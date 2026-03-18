@@ -321,7 +321,11 @@ class VaultService:
                 citekey=citekey,
             )
             if duplicate is not None:
-                return duplicate
+                indexed_path = self.index.get_path(duplicate)
+                if indexed_path is not None:
+                    resolved = self.reconcile_index_entry(duplicate, indexed_path)
+                    if resolved is not None:
+                        return duplicate
         for paper_card, _ in self._paper_card_records():
             if normalized_title and slugify(paper_card.title) == normalized_title:
                 return paper_card.id

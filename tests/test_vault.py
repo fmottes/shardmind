@@ -222,6 +222,27 @@ Summary here
                 citekey="smith2025memory",
             )
 
+    def test_deleted_paper_card_does_not_block_recreation_from_stale_index(self) -> None:
+        paper_card, relative_path = self.runtime.vault.create_paper_card(
+            title="Duplicate Me",
+            url="https://example.com/duplicate",
+            citekey="mottes2026gradient",
+            notes="seed",
+        )
+        self.runtime.index.reindex_object(paper_card, relative_path)
+        (self.runtime.settings.vault_path / relative_path).unlink()
+
+        recreated, recreated_path = self.runtime.vault.create_paper_card(
+            title="Duplicate Me",
+            url="https://example.com/duplicate",
+            citekey="mottes2026gradient",
+            notes="seed",
+        )
+        self.assertNotEqual(recreated.id, paper_card.id)
+        self.assertEqual(self.runtime.index.get_path(paper_card.id), None)
+        self.assertEqual(self.runtime.index.get_path(recreated.id), None)
+        self.assertTrue((self.runtime.settings.vault_path / recreated_path).exists())
+
     def test_invalid_citekey_format_is_rejected(self) -> None:
         with self.assertRaisesRegex(InvalidInputError, "mottes2026gradient"):
             self.runtime.vault.create_paper_card(
