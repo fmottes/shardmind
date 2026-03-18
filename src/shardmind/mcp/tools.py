@@ -17,7 +17,6 @@ WIKILINK_GUIDANCE = (
     "wikilink using the file stem returned by retrieval, for example "
     "[[memory-architecture-idea--1a2b3c4d]]. Do not use frontmatter title as the link target."
 )
-COLLECTION_REPAIR_PASSES = 3
 
 
 class KnowledgeTools:
@@ -50,7 +49,6 @@ class KnowledgeTools:
                 destination=destination,
                 tags=tags,
             )
-            self.index.reindex_note(note, path)
             return {
                 "ok": True,
                 "result": {
@@ -102,7 +100,6 @@ class KnowledgeTools:
                 notes=notes,
                 tags=tags,
             )
-            self.index.reindex_object(paper_card, path)
             return {
                 "ok": True,
                 "result": {
@@ -136,7 +133,6 @@ class KnowledgeTools:
                 content=content,
                 section=section,
             )
-            self.index.reindex_object(note, path)
             return {
                 "ok": True,
                 "result": {
@@ -190,7 +186,6 @@ class KnowledgeTools:
                 metadata=next_metadata,
                 mode=next_mode,
             )
-            self.index.reindex_object(paper_card, path)
             return {
                 "ok": True,
                 "result": {
@@ -283,10 +278,9 @@ class KnowledgeTools:
         path_scope: str | None,
         limit: int,
     ) -> list[dict[str, object]]:
-        live_objects: list[dict[str, object]] = []
-        for _ in range(COLLECTION_REPAIR_PASSES):
+        while True:
             stale_found = False
-            live_objects = []
+            live_objects: list[dict[str, object]] = []
             indexed_objects = self.index.list_objects(
                 object_type=object_type,
                 path_scope=path_scope,
@@ -313,7 +307,6 @@ class KnowledgeTools:
                 )
             if len(live_objects) >= limit or not stale_found:
                 return live_objects[:limit]
-        return live_objects[:limit]
 
     def _search_live_results(
         self,
@@ -324,10 +317,9 @@ class KnowledgeTools:
         top_k: int,
         tags: list[str] | None,
     ) -> list[SearchResult]:
-        live_results: list[SearchResult] = []
-        for _ in range(COLLECTION_REPAIR_PASSES):
+        while True:
             stale_found = False
-            live_results = []
+            live_results: list[SearchResult] = []
             indexed_results = self.index.search(
                 query=query,
                 object_types=object_types,
@@ -347,4 +339,3 @@ class KnowledgeTools:
                 live_results.append(candidate)
             if len(live_results) >= top_k or not stale_found:
                 return live_results[:top_k]
-        return live_results[:top_k]

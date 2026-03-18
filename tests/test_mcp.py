@@ -224,6 +224,23 @@ class MCPToolsTest(unittest.TestCase):
         self.assertEqual(ids, {first["result"]["id"], second["result"]["id"]})
         self.assertIsNone(self.runtime.index.get_path(third["result"]["id"]))
 
+    def test_list_objects_drains_more_than_three_stale_rows(self) -> None:
+        created = [
+            self.runtime.tools.create_note(title=f"Note {index}", content="alpha")
+            for index in range(5)
+        ]
+        for response in created:
+            self.assertTrue(response["ok"])
+
+        for response in created[1:]:
+            deleted_path = self.runtime.settings.vault_path / response["result"]["path"]
+            deleted_path.unlink()
+
+        listed = self.runtime.tools.list_objects(object_type="note", limit=1)
+        self.assertTrue(listed["ok"])
+        self.assertEqual(len(listed["result"]["objects"]), 1)
+        self.assertEqual(listed["result"]["objects"][0]["id"], created[0]["result"]["id"])
+
     def test_search_repairs_moved_paths(self) -> None:
         created = self.runtime.tools.create_note(
             title="Moved note",
@@ -275,6 +292,20 @@ class MCPToolsTest(unittest.TestCase):
             (created["result"]["id"],),
         ).fetchone()[0]
         self.assertEqual(chunk_count, 0)
+
+    def test_get_object_tolerates_unrelated_malformed_file_during_repair(self) -> None:
+        created = self.runtime.tools.create_note(title="Moved note", content="delta repair target")
+        self.assertTrue(created["ok"])
+        source = self.runtime.settings.vault_path / created["result"]["path"]
+        destination = self.runtime.settings.vault_path / "notes" / "scratch" / source.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source.replace(destination)
+        bad = self.runtime.settings.vault_path / "notes" / "inbox" / "broken.md"
+        bad.write_text("not frontmatter", encoding="utf-8")
+
+        fetched = self.runtime.tools.get_object(created["result"]["id"])
+        self.assertTrue(fetched["ok"])
+        self.assertEqual(fetched["result"]["id"], created["result"]["id"])
 
     def test_user_notes_remain_rejected_from_edit(self) -> None:
         created = self.runtime.tools.create_paper_card(

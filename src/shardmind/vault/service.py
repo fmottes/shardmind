@@ -88,6 +88,7 @@ class VaultService:
             f"notes/{destination_name}/{self._object_stem(normalized_title, object_id)}.md"
         )
         self._write_object(relative_path, render_note(note))
+        self._reindex_if_available(note, relative_path)
         self.log_write("knowledge.create_note", note.id, "create", True, relative_path)
         return note, relative_path
 
@@ -137,6 +138,7 @@ class VaultService:
             f"{self._object_stem(normalized_citekey or canonical_title, object_id)}.md"
         )
         self._write_object(relative_path, render_paper_card(paper_card))
+        self._reindex_if_available(paper_card, relative_path)
         self.log_write("knowledge.create_paper_card", paper_card.id, "create", True, relative_path)
         return paper_card, relative_path
 
@@ -157,6 +159,7 @@ class VaultService:
         note.updated_at = self._timestamp(self._now())
         self.schema_store.validate_note(note)
         self._write_object(relative_path, render_note(note))
+        self._reindex_if_available(note, relative_path)
         self.log_write("knowledge.append_to_note", note.id, "append", True, relative_path)
         return note, relative_path
 
@@ -195,6 +198,7 @@ class VaultService:
             paper_card.updated_at = self._timestamp(self._now())
             self.schema_store.validate_paper_card(paper_card)
             self._write_object(relative_path, render_paper_card(paper_card))
+            self._reindex_if_available(paper_card, relative_path)
         self.log_write(
             "knowledge.edit_paper_card",
             paper_card.id,
@@ -238,12 +242,13 @@ class VaultService:
         relative_path: str,
     ) -> tuple[ObjectRecord, str] | None:
         indexed_record = self._read_from_relative_path(relative_path)
-        if indexed_record is not None and indexed_record[0].id == object_id:
-            return indexed_record
+        if indexed_record is not None:
+            if indexed_record[0].id == object_id:
+                return indexed_record
+            self._reindex_if_available(indexed_record[0], indexed_record[1])
         scanned = self._scan_for_object(object_id)
         if scanned is not None:
-            if self.index is not None:
-                self.index.reindex_object(scanned[0], scanned[1])
+            self._reindex_if_available(scanned[0], scanned[1])
             return scanned
         if self.index is not None:
             self.index.remove_object(object_id)
@@ -275,8 +280,12 @@ class VaultService:
             "success": success,
             "path": path,
         }
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, sort_keys=True) + "\n")
+        try:
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, sort_keys=True) + "\n")
+        except OSError:
+            # Logging is best-effort; a log failure must not turn a completed write into an error.
+            return
 
     def _note_paths(self) -> list[Path]:
         return sorted((self.vault_path / "notes").glob("*/*.md"))
@@ -289,9 +298,12 @@ class VaultService:
 
     def _scan_for_object(self, object_id: str) -> tuple[ObjectRecord, str] | None:
         for path in self._object_paths():
-            record = parse_object(path.read_text(encoding="utf-8"))
+            parsed = self._safe_parse_object_path(path)
+            if parsed is None:
+                continue
+            record, relative_path = parsed
             if record.id == object_id:
-                return record, path.relative_to(self.vault_path).as_posix()
+                return record, relative_path
         return None
 
     def _read_from_relative_path(self, relative_path: str) -> tuple[ObjectRecord, str] | None:
@@ -308,8 +320,9 @@ class VaultService:
     def _paper_card_records(self) -> list[tuple[PaperCard, str]]:
         results: list[tuple[PaperCard, str]] = []
         for path in self._paper_card_paths():
-            relative_path = path.relative_to(self.vault_path).as_posix()
-            results.append((parse_paper_card(path.read_text(encoding="utf-8")), relative_path))
+            parsed = self._safe_parse_paper_card_path(path)
+            if parsed is not None:
+                results.append(parsed)
         return results
 
     def _duplicate_paper_card_id(self, title: str, url: str, citekey: str) -> str | None:
@@ -334,6 +347,33 @@ class VaultService:
             if citekey and paper_card.citekey and paper_card.citekey == citekey:
                 return paper_card.id
         return None
+
+    def _safe_parse_object_path(self, path: Path) -> tuple[ObjectRecord, str] | None:
+        try:
+            payload = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        try:
+            record = parse_object(payload)
+        except ValueError:
+            return None
+        return record, path.relative_to(self.vault_path).as_posix()
+
+    def _safe_parse_paper_card_path(self, path: Path) -> tuple[PaperCard, str] | None:
+        try:
+            payload = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        try:
+            record = parse_paper_card(payload)
+        except ValueError:
+            return None
+        return record, path.relative_to(self.vault_path).as_posix()
+
+    def _reindex_if_available(self, record: ObjectRecord, relative_path: str) -> None:
+        if self.index is None:
+            return
+        self.index.reindex_object(record, relative_path)
 
     def _normalize_destination(self, destination: str | None) -> str:
         candidate = (destination or "inbox").strip().lower()

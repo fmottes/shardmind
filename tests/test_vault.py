@@ -240,8 +240,38 @@ Summary here
         )
         self.assertNotEqual(recreated.id, paper_card.id)
         self.assertEqual(self.runtime.index.get_path(paper_card.id), None)
-        self.assertEqual(self.runtime.index.get_path(recreated.id), None)
+        self.assertEqual(self.runtime.index.get_path(recreated.id), recreated_path)
         self.assertTrue((self.runtime.settings.vault_path / recreated_path).exists())
+
+    def test_reconcile_indexes_replacement_object_at_stale_path(self) -> None:
+        original, original_path = self.runtime.vault.create_note(title="Original", content="a")
+        replacement, replacement_path = self.runtime.vault.create_note(
+            title="Replacement",
+            content="b",
+        )
+        (self.runtime.settings.vault_path / original_path).write_text(
+            render_note(replacement),
+            encoding="utf-8",
+        )
+        (self.runtime.settings.vault_path / replacement_path).unlink()
+
+        resolved = self.runtime.vault.reconcile_index_entry(original.id, original_path)
+        self.assertIsNone(resolved)
+        self.assertIsNone(self.runtime.index.get_path(original.id))
+        self.assertEqual(self.runtime.index.get_path(replacement.id), original_path)
+
+    def test_duplicate_scan_skips_malformed_paper_card_file(self) -> None:
+        malformed = self.runtime.settings.vault_path / "library" / "papers" / "broken.md"
+        malformed.write_text("not frontmatter", encoding="utf-8")
+
+        created, relative_path = self.runtime.vault.create_paper_card(
+            title="Fresh paper",
+            url="https://example.com/fresh",
+            citekey="fresh2026paper",
+            notes="seed",
+        )
+        self.assertTrue((self.runtime.settings.vault_path / relative_path).exists())
+        self.assertEqual(created.title, "Fresh paper")
 
     def test_invalid_citekey_format_is_rejected(self) -> None:
         with self.assertRaisesRegex(InvalidInputError, "mottes2026gradient"):
