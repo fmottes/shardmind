@@ -36,6 +36,7 @@ Useful commands:
 
 ```bash
 uv run shardmind init-vault
+uv run shardmind reindex-all
 uv run shardmind-mcp
 ```
 
@@ -118,4 +119,6 @@ well:
 
 - `dev-docs/` is scratch/reference material and not part of the runtime product surface.
 - The vault is canonical; the SQLite index is derived and can be rebuilt.
+- `uv run shardmind reindex-all` is the supported repair path after manual vault edits or index drift.
 - Server-side LLM generation is intentionally not implemented in the current milestone.
+- Server-side note normalization is intentionally not implemented in the current milestone.

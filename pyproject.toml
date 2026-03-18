@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Francesco" }]
-dependencies = ["mcp"]
+dependencies = ["jsonschema", "mcp"]
 
 [project.optional-dependencies]
 dev = []

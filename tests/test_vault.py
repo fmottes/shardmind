@@ -9,6 +9,7 @@ from unittest.mock import patch
 from shardmind.bootstrap import build_runtime
 from shardmind.config import Settings, default_vault_path
 from shardmind.errors import DuplicateObjectError
+from shardmind.models import PaperCard
 from shardmind.vault.ids import slugify
 from shardmind.vault.markdown import parse_note, parse_paper_card, render_note, render_paper_card
 
@@ -32,6 +33,7 @@ class VaultServiceTest(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.runtime = build_runtime()
+        self.addCleanup(self.runtime.close)
 
     def test_slugify_normalizes_human_titles(self) -> None:
         self.assertEqual(slugify("Memory Architecture Idea!"), "memory-architecture-idea")
@@ -49,6 +51,7 @@ class VaultServiceTest(unittest.TestCase):
         self.assertEqual(saved_note.id, note.id)
         self.assertEqual(saved_note.sections.content, "First line\nSecond line")
         self.assertEqual(saved_note.tags, ["memory", "agents"])
+        self.assertIn('title: "Memory Architecture Idea"', note_path.read_text(encoding="utf-8"))
 
         log_path = self.runtime.settings.vault_path / "system" / "logs" / "operations.log"
         event = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
@@ -67,6 +70,45 @@ class VaultServiceTest(unittest.TestCase):
         self.assertEqual(parsed.title, note.title)
         self.assertEqual(parsed.sections.content, note.sections.content)
 
+    def test_frontmatter_parser_tolerates_obsidian_yaml_round_trip(self) -> None:
+        markdown = """---
+id: paper-attention
+type: paper-card
+title: "Attention Is All You Need: A Transformer Architecture"
+authors:
+  - A. Author
+  - B. Author
+year: 2025
+source: arxiv
+url: https://example.com/paper
+citekey: attention-2025
+tags:
+  - memory
+  - agents
+status: reviewed
+provenance:
+  created_from: mcp
+  source_type: zotero
+  source_ref: doi:10.1000/test
+  llm_enriched: true
+created_at: 2026-03-18T15:42:00Z
+updated_at: 2026-03-18T15:45:00Z
+---
+
+# Source notes
+
+Abstract here
+
+# LLM summary
+
+Summary here
+"""
+        parsed = parse_paper_card(markdown)
+        self.assertEqual(parsed.title, "Attention Is All You Need: A Transformer Architecture")
+        self.assertEqual(parsed.authors, ["A. Author", "B. Author"])
+        self.assertEqual(parsed.tags, ["memory", "agents"])
+        self.assertTrue(parsed.provenance.llm_enriched)
+
     def test_create_paper_card_writes_canonical_markdown_and_log(self) -> None:
         paper_card, relative_path = self.runtime.vault.create_paper_card(
             title="Memory Systems for Research Agents",
@@ -83,6 +125,10 @@ class VaultServiceTest(unittest.TestCase):
         self.assertEqual(saved.id, paper_card.id)
         self.assertEqual(saved.sections.source_notes, "Typed long-term memory for research agents")
         self.assertEqual(saved.sections.llm_summary, "")
+        self.assertIn(
+            'title: "Memory Systems for Research Agents"',
+            paper_path.read_text(encoding="utf-8"),
+        )
 
         log_path = self.runtime.settings.vault_path / "system" / "logs" / "operations.log"
         event = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
@@ -127,6 +173,19 @@ class VaultServiceTest(unittest.TestCase):
         self.assertEqual(updated.sections.source_notes, "Original source")
         self.assertEqual(updated.sections.user_notes, "Do not overwrite")
         self.assertEqual(updated.source, "conference")
+        self.assertTrue(updated.provenance.llm_enriched)
+
+    def test_metadata_only_enrich_does_not_set_llm_provenance(self) -> None:
+        paper_card, _ = self.runtime.vault.create_paper_card(
+            title="Metadata Only",
+            source_text="Original source",
+        )
+        updated, _ = self.runtime.vault.update_paper_card_sections(
+            paper_card.id,
+            metadata={"source": "conference"},
+            mode="fill-empty",
+        )
+        self.assertFalse(updated.provenance.llm_enriched)
 
     def test_duplicate_paper_card_detection_uses_title_or_url(self) -> None:
         self.runtime.vault.create_paper_card(
@@ -152,3 +211,16 @@ class VaultServiceTest(unittest.TestCase):
         ):
             settings = Settings.load()
         self.assertEqual(settings.vault_path, default_vault_path(home))
+
+    def test_rendered_paper_card_round_trips_bracket_like_strings(self) -> None:
+        card = PaperCard(
+            id="paper-brackets",
+            title="Lists [not tags]",
+            source="arxiv:2501.12345",
+            url="https://example.com/paper",
+            citekey="brackets",
+        )
+        rendered = render_paper_card(card)
+        parsed = parse_paper_card(rendered)
+        self.assertEqual(parsed.title, "Lists [not tags]")
+        self.assertEqual(parsed.source, "arxiv:2501.12345")

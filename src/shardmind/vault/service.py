@@ -13,6 +13,7 @@ from shardmind.errors import (
     NotFoundError,
     WriteFailedError,
 )
+from shardmind.index.service import IndexService
 from shardmind.models import (
     Note,
     NoteProvenance,
@@ -22,6 +23,7 @@ from shardmind.models import (
     PaperCardProvenance,
     PaperCardSections,
 )
+from shardmind.paper_cards import ENRICHABLE_PAPER_CARD_SECTIONS
 from shardmind.schemas import SchemaStore
 from shardmind.vault.bootstrap import bootstrap_vault
 from shardmind.vault.ids import note_id, paper_card_id, slugify
@@ -34,12 +36,6 @@ from shardmind.vault.markdown import (
 )
 
 DESTINATIONS = {"inbox", "scratch", "daily"}
-ENRICHABLE_PAPER_CARD_SECTIONS = {
-    "llm_summary",
-    "main_claims",
-    "why_relevant",
-    "limitations",
-}
 SAFE_PAPER_CARD_METADATA_FIELDS = {
     "authors",
     "year",
@@ -52,9 +48,15 @@ SAFE_PAPER_CARD_METADATA_FIELDS = {
 
 
 class VaultService:
-    def __init__(self, vault_path: Path, schema_store: SchemaStore):
+    def __init__(
+        self,
+        vault_path: Path,
+        schema_store: SchemaStore,
+        index: IndexService | None = None,
+    ):
         self.vault_path = vault_path
         self.schema_store = schema_store
+        self.index = index
         bootstrap_vault(vault_path)
 
     def create_note(
@@ -73,7 +75,7 @@ class VaultService:
         note = Note(
             id=note_id(normalized_title, timestamp=now),
             title=normalized_title,
-            tags=tags or [],
+            tags=list(tags or []),
             provenance=NoteProvenance(created_from=created_from),
             created_at=self._timestamp(now),
             updated_at=self._timestamp(now),
@@ -103,8 +105,7 @@ class VaultService:
         if duplicate_of is not None:
             raise DuplicateObjectError("A paper card with matching title or URL already exists.")
         now = self._now()
-        existing_ids = {card.id for card, _ in self._paper_card_records()}
-        object_id = paper_card_id(canonical_title, existing_ids)
+        object_id = paper_card_id(canonical_title, self._existing_paper_card_ids())
         paper_card = PaperCard(
             id=object_id,
             title=canonical_title,
@@ -130,7 +131,7 @@ class VaultService:
         section: str | None = None,
     ) -> tuple[Note, str]:
         if section not in (None, "", "content", "Content"):
-            raise InvalidInputError("Milestone 1 only supports appending to the Content section.")
+            raise InvalidInputError("Milestone 2 only supports appending to the Content section.")
         note, relative_path = self.read_note(note_id_value)
         appended = content.strip()
         if not appended:
@@ -155,6 +156,7 @@ class VaultService:
             raise InvalidInputError("mode must be one of: fill-empty, refresh.")
         paper_card, relative_path = self.read_paper_card(paper_card_id_value)
         changed = False
+        llm_sections_changed = False
         for section_name, value in (sections or {}).items():
             if section_name not in ENRICHABLE_PAPER_CARD_SECTIONS:
                 raise InvalidInputError(f"Unsupported paper card section '{section_name}'.")
@@ -165,6 +167,7 @@ class VaultService:
             if next_value != current_value:
                 setattr(paper_card.sections, section_name, next_value)
                 changed = True
+                llm_sections_changed = True
         for field_name, value in (metadata or {}).items():
             if field_name not in SAFE_PAPER_CARD_METADATA_FIELDS:
                 raise InvalidInputError(f"Unsupported paper card metadata field '{field_name}'.")
@@ -175,7 +178,8 @@ class VaultService:
                 setattr(paper_card, field_name, next_value)
                 changed = True
         if changed:
-            paper_card.provenance.llm_enriched = True
+            if llm_sections_changed:
+                paper_card.provenance.llm_enriched = True
             paper_card.updated_at = self._timestamp(self._now())
             self.schema_store.validate_paper_card(paper_card)
             self._write_object(relative_path, render_paper_card(paper_card))
@@ -189,10 +193,19 @@ class VaultService:
         return paper_card, relative_path
 
     def read_object(self, object_id: str) -> tuple[ObjectRecord, str]:
-        for path in self._object_paths():
-            record = parse_object(path.read_text(encoding="utf-8"))
-            if record.id == object_id:
-                return record, path.relative_to(self.vault_path).as_posix()
+        if self.index is not None:
+            indexed_path = self.index.get_path(object_id)
+            if indexed_path:
+                indexed_record = self._read_from_relative_path(indexed_path)
+                if indexed_record is not None and indexed_record[0].id == object_id:
+                    return indexed_record
+        scanned = self._scan_for_object(object_id)
+        if scanned is not None:
+            if self.index is not None:
+                self.index.reindex_object(scanned[0], scanned[1])
+            return scanned
+        if self.index is not None and self.index.get_path(object_id) is not None:
+            self.index.remove_object(object_id)
         raise NotFoundError(f"No object found for id '{object_id}'.")
 
     def read_note(self, note_id_value: str) -> tuple[Note, str]:
@@ -216,6 +229,15 @@ class VaultService:
             results.append((parse_note(path.read_text(encoding="utf-8")), relative_path))
         results.sort(key=lambda item: item[0].updated_at, reverse=True)
         return results
+
+    def list_objects(self) -> list[tuple[ObjectRecord, str]]:
+        return [
+            (
+                parse_object(path.read_text(encoding="utf-8")),
+                path.relative_to(self.vault_path).as_posix(),
+            )
+            for path in self._object_paths()
+        ]
 
     def log_write(
         self,
@@ -246,6 +268,30 @@ class VaultService:
     def _object_paths(self) -> list[Path]:
         return sorted([*self._note_paths(), *self._paper_card_paths()])
 
+    def _scan_for_object(self, object_id: str) -> tuple[ObjectRecord, str] | None:
+        for path in self._object_paths():
+            record = parse_object(path.read_text(encoding="utf-8"))
+            if record.id == object_id:
+                return record, path.relative_to(self.vault_path).as_posix()
+        return None
+
+    def _read_from_relative_path(self, relative_path: str) -> tuple[ObjectRecord, str] | None:
+        target = self.vault_path / relative_path
+        try:
+            payload = target.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        try:
+            return parse_object(payload), relative_path
+        except ValueError:
+            return None
+
+    def _existing_paper_card_ids(self) -> set[str]:
+        existing_ids = {card.id for card, _ in self._paper_card_records()}
+        if self.index is not None:
+            existing_ids.update(self.index.existing_paper_card_ids())
+        return existing_ids
+
     def _paper_card_records(self) -> list[tuple[PaperCard, str]]:
         results: list[tuple[PaperCard, str]] = []
         for path in self._paper_card_paths():
@@ -255,6 +301,14 @@ class VaultService:
 
     def _duplicate_paper_card_id(self, title: str, url: str, citekey: str) -> str | None:
         normalized_title = slugify(title) if title else ""
+        if self.index is not None:
+            duplicate = self.index.find_duplicate_paper_card(
+                normalized_title=normalized_title,
+                url=url,
+                citekey=citekey,
+            )
+            if duplicate is not None:
+                return duplicate
         for paper_card, _ in self._paper_card_records():
             if normalized_title and slugify(paper_card.title) == normalized_title:
                 return paper_card.id

@@ -19,12 +19,15 @@ class Runtime:
     index: IndexService
     tools: KnowledgeTools
 
+    def close(self) -> None:
+        self.index.close()
+
 
 def build_runtime() -> Runtime:
     settings = Settings.load()
     schema_store = SchemaStore(settings.shared_path)
-    vault = VaultService(settings.vault_path, schema_store)
     index = IndexService(settings.sqlite_path)
+    vault = VaultService(settings.vault_path, schema_store, index=index)
     tools = KnowledgeTools(vault=vault, index=index)
     return Runtime(
         settings=settings,

@@ -3,59 +3,35 @@
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import ConfigDict
 
 from shardmind.bootstrap import build_runtime
+from shardmind.mcp.registry import iter_tool_specs
 from shardmind.mcp.tools import KnowledgeTools
-
-MCP_TOOL_NAMES = {
-    "create_note": "knowledge_create_note",
-    "create_paper_card": "knowledge_create_paper_card",
-    "append_to_note": "knowledge_append_to_note",
-    "enrich_paper_card": "knowledge_enrich_paper_card",
-    "get_object": "knowledge_get_object",
-    "list_objects": "knowledge_list_objects",
-    "search": "knowledge_search",
-}
 
 
 def register_tools(server: FastMCP, tools: KnowledgeTools) -> FastMCP:
     """Register the current MCP tool surface onto a FastMCP server."""
-
-    @server.tool(name=MCP_TOOL_NAMES["create_note"])
-    def create_note(payload: dict) -> dict:
-        return tools.create_note(payload)
-
-    @server.tool(name=MCP_TOOL_NAMES["create_paper_card"])
-    def create_paper_card(payload: dict) -> dict:
-        return tools.create_paper_card(payload)
-
-    @server.tool(name=MCP_TOOL_NAMES["append_to_note"])
-    def append_to_note(payload: dict) -> dict:
-        return tools.append_to_note(payload)
-
-    @server.tool(name=MCP_TOOL_NAMES["enrich_paper_card"])
-    def enrich_paper_card(payload: dict) -> dict:
-        return tools.enrich_paper_card(payload)
-
-    @server.tool(name=MCP_TOOL_NAMES["get_object"])
-    def get_object(payload: dict) -> dict:
-        return tools.get_object(payload)
-
-    @server.tool(name=MCP_TOOL_NAMES["list_objects"])
-    def list_objects(payload: dict) -> dict:
-        return tools.list_objects(payload)
-
-    @server.tool(name=MCP_TOOL_NAMES["search"])
-    def search(payload: dict) -> dict:
-        return tools.search(payload)
-
+    for spec in iter_tool_specs(KnowledgeTools):
+        method = getattr(tools, spec.method_name)
+        server.tool(name=spec.exported_name)(method)
+        registered = server._tool_manager._tools[spec.exported_name]  # noqa: SLF001
+        registered.fn_metadata.arg_model.model_config = ConfigDict(
+            extra="forbid",
+            arbitrary_types_allowed=True,
+        )
+        registered.fn_metadata.arg_model.model_rebuild(force=True)
+        registered.parameters = registered.fn_metadata.arg_model.model_json_schema(by_alias=True)
     return server
 
 
 def run_server(tools: KnowledgeTools) -> int:
     server = register_tools(FastMCP("ShardMind"), tools)
-    server.run()
-    return 0
+    try:
+        server.run()
+        return 0
+    finally:
+        tools.index.close()
 
 
 def main() -> int:

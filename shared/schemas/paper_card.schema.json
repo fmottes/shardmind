@@ -31,16 +31,30 @@
       "default": []
     },
     "year": {
-      "type": "integer",
-      "minimum": 1000,
-      "maximum": 3000
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3000
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "source": {
       "type": "string"
     },
     "url": {
-      "type": "string",
-      "format": "uri"
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uri"
+        },
+        {
+          "const": ""
+        }
+      ]
     },
     "citekey": {
       "type": "string"
