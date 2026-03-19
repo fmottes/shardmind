@@ -686,7 +686,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "jsonschema" },
-    { name = "mcp" },
+    { name = "mcp", specifier = ">=1.26,<1.27" },
 ]
 provides-extras = ["dev"]
 

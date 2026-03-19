@@ -40,3 +40,8 @@ class SchemaValidationError(ShardMindError):
 class DuplicateObjectError(ShardMindError):
     def __init__(self, message: str):
         super().__init__("DUPLICATE_OBJECT", message)
+
+
+class InternalError(ShardMindError):
+    def __init__(self, message: str = "Unexpected server error."):
+        super().__init__("INTERNAL_ERROR", message)

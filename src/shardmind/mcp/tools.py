@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
-from shardmind.errors import InvalidInputError, ShardMindError
+from shardmind.errors import InternalError, InvalidInputError, ShardMindError
 from shardmind.index.service import IndexService
 from shardmind.mcp.registry import invoke_registered_tool, tool_spec
 from shardmind.models import SearchResult, path_reference_fields, titled_fields
@@ -56,6 +58,7 @@ EDIT_MODE_GUIDANCE = (
     "Patch mode. fill-empty only writes into empty fields and preserves existing non-empty "
     "values. refresh replaces existing values."
 )
+LOGGER = logging.getLogger(__name__)
 
 
 class KnowledgeTools:
@@ -91,7 +94,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Create a deterministic note from freeform text."""
-        try:
+        def run() -> dict[str, object]:
             self._require_non_empty_string(content, "content")
             note, path = self.vault.create_note(
                 title=title,
@@ -109,8 +112,8 @@ class KnowledgeTools:
                     "created_at": note.created_at,
                 },
             }
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.create_note", run)
 
     @tool_spec("knowledge_create_paper_card", "knowledge.create_paper_card")
     def create_paper_card(
@@ -169,7 +172,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Create a sparse deterministic paper card without server-side LLM generation."""
-        try:
+        def run() -> dict[str, object]:
             if not any((title, url, notes)):
                 raise InvalidInputError("At least one of title, url, or notes must be provided.")
             paper_card, path = self.vault.create_paper_card(
@@ -192,8 +195,8 @@ class KnowledgeTools:
                     "duplicate_of": None,
                 },
             }
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.create_paper_card", run)
 
     @tool_spec("knowledge_append_to_note", "knowledge.append_to_note")
     def append_to_note(
@@ -219,7 +222,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Append content to the canonical Content section of an existing note."""
-        try:
+        def run() -> dict[str, object]:
             self._require_non_empty_string(id, "id")
             self._require_non_empty_string(content, "content")
             note, path = self.vault.append_to_note(
@@ -236,8 +239,8 @@ class KnowledgeTools:
                     "updated_at": note.updated_at,
                 },
             }
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.append_to_note", run)
 
     @tool_spec("knowledge_edit_note", "knowledge.edit_note")
     def edit_note(
@@ -257,7 +260,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Edit supported sections and metadata on an existing note."""
-        try:
+        def run() -> dict[str, object]:
             self._require_non_empty_string(id, "id")
             next_mode = mode or "refresh"
             next_sections = self._optional_dict(sections, "sections")
@@ -280,8 +283,8 @@ class KnowledgeTools:
                     "mode": next_mode,
                 },
             }
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.edit_note", run)
 
     @tool_spec("knowledge_edit_paper_card", "knowledge.edit_paper_card")
     def edit_paper_card(
@@ -301,7 +304,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Edit supported sections and metadata on an existing paper card."""
-        try:
+        def run() -> dict[str, object]:
             self._require_non_empty_string(id, "id")
             next_mode = mode or "fill-empty"
             next_sections = self._optional_dict(sections, "sections")
@@ -324,20 +327,20 @@ class KnowledgeTools:
                     "mode": next_mode,
                 },
             }
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.edit_paper_card", run)
 
     @tool_spec("knowledge_get_object", "knowledge.get_object")
     def get_object(
         self,
         id: Annotated[str, Field(description=OBJECT_ID_GUIDANCE)],  # noqa: A002
     ) -> dict[str, object]:
-        try:
+        def run() -> dict[str, object]:
             self._require_non_empty_string(id, "id")
             record, path = self.vault.read_object(id)
             return {"ok": True, "result": record.to_document(path)}
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.get_object", run)
 
     @tool_spec("knowledge_list_objects", "knowledge.list_objects")
     def list_objects(
@@ -357,15 +360,15 @@ class KnowledgeTools:
             Field(ge=1, le=200, description="Maximum number of objects to return."),
         ] = 50,
     ) -> dict[str, object]:
-        try:
+        def run() -> dict[str, object]:
             objects = self._list_live_objects(
                 object_type=object_type,
                 path_scope=path_scope,
                 limit=limit,
             )
             return {"ok": True, "result": {"objects": objects}}
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.list_objects", run)
 
     @tool_spec("knowledge_search", "knowledge.search")
     def search(
@@ -395,7 +398,7 @@ class KnowledgeTools:
             ),
         ] = None,
     ) -> dict[str, object]:
-        try:
+        def run() -> dict[str, object]:
             self._require_non_empty_string(query, "query")
             results = self._search_live_results(
                 query=query,
@@ -412,14 +415,27 @@ class KnowledgeTools:
                     "top_k": top_k,
                 },
             }
-        except ShardMindError as exc:
-            return exc.to_response()
+
+        return self._execute_tool("knowledge.search", run)
 
     def invoke(self, tool_name: str, payload: dict[str, Any]) -> dict[str, object]:
-        try:
+        def run() -> dict[str, object]:
             return invoke_registered_tool(self, tool_name, payload)
+
+        return self._execute_tool(tool_name, run)
+
+    def _execute_tool(
+        self,
+        tool_name: str,
+        operation: Callable[[], dict[str, object]],
+    ) -> dict[str, object]:
+        try:
+            return operation()
         except ShardMindError as exc:
             return exc.to_response()
+        except Exception:
+            LOGGER.exception("Unexpected error while executing %s", tool_name)
+            return InternalError().to_response()
 
     def _require_non_empty_string(self, value: object, field_name: str) -> None:
         if not isinstance(value, str) or not value.strip():

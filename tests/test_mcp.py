@@ -174,6 +174,12 @@ class MCPToolsTest(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "INVALID_INPUT")
 
+    def test_unexpected_errors_return_internal_error(self) -> None:
+        with patch.object(self.runtime.vault, "create_note", side_effect=RuntimeError("boom")):
+            response = self.runtime.tools.create_note(content="body")
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "INTERNAL_ERROR")
+
     def test_removed_fields_are_rejected_by_invoke(self) -> None:
         response = self.runtime.tools.invoke(
             "knowledge_create_paper_card",

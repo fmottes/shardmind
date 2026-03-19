@@ -32,9 +32,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "reindex-all":
-            records = runtime.vault.list_objects()
+            records, skipped_paths = runtime.vault.list_indexable_objects()
             runtime.index.rebuild(records)
             print(len(records))
+            if skipped_paths:
+                print(
+                    f"Skipped {len(skipped_paths)} malformed file(s): {', '.join(skipped_paths)}",
+                    file=sys.stderr,
+                )
             return 0
 
         if args.command == "invoke":

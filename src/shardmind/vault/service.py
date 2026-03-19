@@ -301,7 +301,8 @@ class VaultService:
             self.index.remove_object(object_id)
         return None
 
-    def list_objects(self) -> list[tuple[ObjectRecord, str]]:
+    def list_objects_strict(self) -> list[tuple[ObjectRecord, str]]:
+        """List all vault objects and fail fast on malformed files."""
         return [
             (
                 parse_object(path.read_text(encoding="utf-8")),
@@ -309,6 +310,21 @@ class VaultService:
             )
             for path in self._object_paths()
         ]
+
+    def list_objects(self) -> list[tuple[ObjectRecord, str]]:
+        """Backward-compatible alias for strict full-vault parsing."""
+        return self.list_objects_strict()
+
+    def list_indexable_objects(self) -> tuple[list[tuple[ObjectRecord, str]], list[str]]:
+        records: list[tuple[ObjectRecord, str]] = []
+        skipped_paths: list[str] = []
+        for path in self._object_paths():
+            parsed = self._safe_parse_object_path(path)
+            if parsed is None:
+                skipped_paths.append(path.relative_to(self.vault_path).as_posix())
+                continue
+            records.append(parsed)
+        return records, skipped_paths
 
     def log_write(
         self,

@@ -137,7 +137,7 @@ class IndexServiceTest(unittest.TestCase):
         )
         self.runtime.index.remove_object(manual_note.id)
 
-        self.runtime.index.rebuild(self.runtime.vault.list_objects())
+        self.runtime.index.rebuild(self.runtime.vault.list_objects_strict())
         ids = {item["id"] for item in self.runtime.index.list_objects(limit=10)}
         self.assertIn(note.id, ids)
         self.assertIn(manual_note.id, ids)
@@ -150,7 +150,7 @@ class IndexServiceTest(unittest.TestCase):
         bad_path.write_text("not frontmatter", encoding="utf-8")
 
         with self.assertRaises(ValueError):
-            self.runtime.vault.list_objects()
+            self.runtime.vault.list_objects_strict()
 
         objects = self.runtime.index.list_objects(limit=10)
         self.assertEqual([item["id"] for item in objects], [note.id])

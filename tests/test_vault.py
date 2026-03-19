@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -311,6 +312,16 @@ Summary here
         self.assertTrue((self.runtime.settings.vault_path / relative_path).exists())
         self.assertEqual(created.title, "Fresh paper")
 
+    def test_list_indexable_objects_skips_malformed_files(self) -> None:
+        note, path = self.runtime.vault.create_note(title="Indexable", content="body")
+        malformed = self.runtime.settings.vault_path / "notes" / "inbox" / "broken.md"
+        malformed.write_text("not frontmatter", encoding="utf-8")
+
+        records, skipped = self.runtime.vault.list_indexable_objects()
+
+        self.assertEqual(records, [(note, path)])
+        self.assertEqual(skipped, ["notes/inbox/broken.md"])
+
     def test_invalid_citekey_format_is_rejected(self) -> None:
         with self.assertRaisesRegex(InvalidInputError, "mottes2026gradient"):
             self.runtime.vault.create_paper_card(
@@ -331,6 +342,24 @@ Summary here
         ):
             settings = Settings.load()
         self.assertEqual(settings.vault_path, default_vault_path(home))
+
+    def test_settings_fall_back_to_bundled_shared_assets(self) -> None:
+        self.env.stop()
+        bundled_root = self.root / "bundled"
+        shutil.copytree(PROJECT_ROOT / "shared", bundled_root)
+        home = self.root / "home"
+        with patch.dict(
+            "os.environ",
+            {
+                "HOME": str(home),
+            },
+            clear=True,
+        ):
+            with patch("shardmind.config.find_project_root", side_effect=RuntimeError("missing")):
+                with patch("shardmind.config.bundled_shared_path", return_value=bundled_root):
+                    settings = Settings.load()
+        self.assertIsNone(settings.project_root)
+        self.assertEqual(settings.shared_path, bundled_root)
 
     def test_rendered_paper_card_round_trips_bracket_like_strings(self) -> None:
         card = PaperCard(
