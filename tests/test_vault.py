@@ -381,3 +381,40 @@ Summary here
         parsed = parse_paper_card(rendered)
         self.assertEqual(parsed.title, "Lists [not tags]")
         self.assertEqual(parsed.source, "arxiv:2501.12345")
+
+    def test_create_note_rejects_pure_numeric_tag(self) -> None:
+        with self.assertRaisesRegex(InvalidInputError, "non-numerical"):
+            self.runtime.vault.create_note(content="body", title="t", tags=["1984"])
+
+    def test_create_note_rejects_spaces_and_double_slash_nesting(self) -> None:
+        with self.assertRaisesRegex(InvalidInputError, "spaces"):
+            self.runtime.vault.create_note(content="body", title="t", tags=["bad tag"])
+        with self.assertRaisesRegex(InvalidInputError, "spaces"):
+            self.runtime.vault.create_note(content="body", title="t", tags=["# my-tag"])
+        with self.assertRaisesRegex(InvalidInputError, "empty nested"):
+            self.runtime.vault.create_note(content="body", title="t", tags=["foo//bar"])
+
+    def test_create_note_rejects_illegal_characters(self) -> None:
+        with self.assertRaisesRegex(InvalidInputError, "only contain"):
+            self.runtime.vault.create_note(content="body", title="t", tags=["foo.bar"])
+
+    def test_create_note_strips_hash_prefix_and_nested_tags_ok(self) -> None:
+        note, _ = self.runtime.vault.create_note(
+            content="body",
+            title="Tagged",
+            tags=["#my-tag", "topic/subtopic"],
+        )
+        self.assertEqual(note.tags, ["my-tag", "topic/subtopic"])
+
+    def test_create_note_dedupes_tags_case_insensitively_first_spelling_wins(self) -> None:
+        note, _ = self.runtime.vault.create_note(
+            content="body",
+            title="Dedupe",
+            tags=["Tag", "tag", "TAG"],
+        )
+        self.assertEqual(note.tags, ["Tag"])
+
+    def test_update_note_tags_validated(self) -> None:
+        note, _ = self.runtime.vault.create_note(content="body", title="n", tags=["ok"])
+        with self.assertRaisesRegex(InvalidInputError, "non-numerical"):
+            self.runtime.vault.update_note(note.id, metadata={"tags": ["999"]}, mode="refresh")

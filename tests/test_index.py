@@ -71,6 +71,44 @@ class IndexServiceTest(unittest.TestCase):
         self.assertEqual(results[0].id, paper_card.id)
         self.assertIn("Summary", results[0].matched_sections)
 
+    def test_search_tag_filter_is_case_insensitive(self) -> None:
+        note, path = self.runtime.vault.create_note(
+            title="Case tag",
+            content="hello memory",
+            tags=["memory"],
+        )
+        self.runtime.index.reindex_object(note, path)
+        results = self.runtime.index.search(
+            "hello",
+            object_types=["note"],
+            tags=["MEMORY"],
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].id, note.id)
+
+    def test_list_tags_returns_distinct_tags_with_filters(self) -> None:
+        note, note_path = self.runtime.vault.create_note(
+            title="N1",
+            content="alpha",
+            tags=["shared", "note-only"],
+        )
+        paper, paper_path = self.runtime.vault.create_paper_card(
+            title="P1",
+            sections={"notes": "beta"},
+            tags=["shared", "paper-only"],
+        )
+        self.runtime.index.reindex_object(note, note_path)
+        self.runtime.index.reindex_object(paper, paper_path)
+
+        all_tags = self.runtime.index.list_tags(limit=50)
+        self.assertEqual(set(all_tags), {"note-only", "paper-only", "shared"})
+
+        note_tags = self.runtime.index.list_tags(object_type="note", limit=50)
+        self.assertEqual(set(note_tags), {"note-only", "shared"})
+
+        scoped = self.runtime.index.list_tags(path_scope="notes/", limit=50)
+        self.assertEqual(set(scoped), {"note-only", "shared"})
+
     def test_search_collapses_mixed_object_results(self) -> None:
         note, note_path = self.runtime.vault.create_note(
             title="Memory note",

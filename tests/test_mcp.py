@@ -257,6 +257,14 @@ class MCPToolsTest(unittest.TestCase):
         self.assertNotIn("payload", parameters["properties"])
         self.assertIn("content", parameters["required"])
         self.assertIn("wikilink", parameters["properties"]["content"]["description"].lower())
+        self.assertIn(
+            "Prefer existing tags",
+            parameters["properties"]["tags"]["description"],
+        )
+        self.assertIn(
+            "shardmind.list_tags",
+            parameters["properties"]["tags"]["description"],
+        )
         create_paper = server._tool_manager._tools["shardmind_create_paper_card"]  # noqa: SLF001
         self.assertIn("citekey", create_paper.parameters["properties"])
         self.assertIn("sections", create_paper.parameters["properties"])
@@ -287,6 +295,14 @@ class MCPToolsTest(unittest.TestCase):
             "usable in one tool call",
             create_paper.parameters["properties"]["sections"]["description"],
         )
+        self.assertIn(
+            "Prefer existing tags",
+            create_paper.parameters["properties"]["tags"]["description"],
+        )
+        self.assertIn(
+            "shardmind.list_tags",
+            create_paper.parameters["properties"]["tags"]["description"],
+        )
         edit_note = server._tool_manager._tools["shardmind_edit_note"]  # noqa: SLF001
         self.assertIn("id", edit_note.parameters["required"])
         self.assertIn("sections", edit_note.parameters["properties"])
@@ -316,6 +332,53 @@ class MCPToolsTest(unittest.TestCase):
                 create_note.run,
                 {"title": "Strict", "content": "body", "normalize": True},
             )
+
+    def test_list_tags_returns_indexed_tags(self) -> None:
+        note = self.runtime.tools.create_note(
+            title="Tagged list",
+            content="body for search",
+            tags=["list-smoke", "shared-tag"],
+        )
+        paper = self.runtime.tools.create_paper_card(
+            title="Tagged paper",
+            sections={"notes": "abstract for search"},
+            tags=["shared-tag", "paper-tag"],
+        )
+        self.assertTrue(note["ok"])
+        self.assertTrue(paper["ok"])
+
+        listed = self.runtime.tools.list_tags(limit=50)
+        self.assertTrue(listed["ok"])
+        self.assertEqual(
+            set(listed["result"]["tags"]),
+            {"list-smoke", "shared-tag", "paper-tag"},
+        )
+
+        notes_only = self.runtime.tools.list_tags(object_type="note", limit=50)
+        self.assertTrue(notes_only["ok"])
+        self.assertEqual(set(notes_only["result"]["tags"]), {"list-smoke", "shared-tag"})
+
+    def test_list_tags_prunes_deleted_ghosts(self) -> None:
+        kept = self.runtime.tools.create_note(
+            title="Live tag note",
+            content="body",
+            tags=["live-tag"],
+        )
+        ghost = self.runtime.tools.create_note(
+            title="Ghost tag note",
+            content="body",
+            tags=["ghost-tag"],
+        )
+        self.assertTrue(kept["ok"])
+        self.assertTrue(ghost["ok"])
+
+        deleted_path = self.runtime.settings.vault_path / ghost["result"]["path"]
+        deleted_path.unlink()
+
+        listed = self.runtime.tools.list_tags(limit=50)
+        self.assertTrue(listed["ok"])
+        self.assertEqual(set(listed["result"]["tags"]), {"live-tag"})
+        self.assertIsNone(self.runtime.index.get_path(ghost["result"]["id"]))
 
     def test_list_objects_includes_wikilink_fields(self) -> None:
         created = self.runtime.tools.create_paper_card(

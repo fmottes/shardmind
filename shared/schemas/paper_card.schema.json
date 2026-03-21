@@ -62,7 +62,8 @@
     "tags": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "description": "Obsidian tags: ASCII letters, digits, _, -, / for nesting; at least one non-digit; no spaces. ShardMind validates on write."
       },
       "default": []
     },

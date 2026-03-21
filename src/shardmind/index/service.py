@@ -207,6 +207,57 @@ class IndexService:
         rows = self._require_connection().execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def list_tags(
+        self,
+        object_type: str | None = None,
+        path_scope: str | None = None,
+        limit: int = 200,
+    ) -> list[str]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if object_type:
+            clauses.append("d.type = ?")
+            params.append(object_type)
+        if path_scope:
+            clauses.append("d.path LIKE ?")
+            params.append(f"{path_scope}%")
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT DISTINCT t.tag AS tag
+            FROM tags t
+            JOIN documents d ON d.id = t.document_id
+            {where_clause}
+            ORDER BY t.tag COLLATE NOCASE
+            LIMIT ?
+        """
+        params.append(limit)
+        rows = self._require_connection().execute(query, params).fetchall()
+        return [str(row["tag"]) for row in rows]
+
+    def list_tag_references(
+        self,
+        object_type: str | None = None,
+        path_scope: str | None = None,
+    ) -> list[dict[str, object]]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if object_type:
+            clauses.append("d.type = ?")
+            params.append(object_type)
+        if path_scope:
+            clauses.append("d.path LIKE ?")
+            params.append(f"{path_scope}%")
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT t.tag AS tag, d.id AS id, d.path AS path
+            FROM tags t
+            JOIN documents d ON d.id = t.document_id
+            {where_clause}
+            ORDER BY t.tag COLLATE NOCASE, d.updated_at DESC
+        """
+        rows = self._require_connection().execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def search(
         self,
         query: str,
@@ -229,7 +280,8 @@ class IndexService:
             filters.append(
                 "EXISTS ("
                 f"SELECT 1 FROM tags {alias} "
-                f"WHERE {alias}.document_id = d.id AND {alias}.tag = ?"
+                f"WHERE {alias}.document_id = d.id "
+                f"AND LOWER({alias}.tag) = LOWER(?)"
                 ")"
             )
             params.append(tag)

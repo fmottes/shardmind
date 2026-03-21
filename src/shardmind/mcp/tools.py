@@ -28,6 +28,10 @@ NOTE_CONTENT_GUIDANCE = (
     "in the note. "
     f"{WIKILINK_GUIDANCE}"
 )
+TAG_CREATION_GUIDANCE = (
+    "Prefer existing tags and existing casing when known instead of inventing near-duplicate "
+    "spellings. If you need to inspect the current tag vocabulary first, call shardmind.list_tags."
+)
 PAPER_CARD_SECTION_PATCH_GUIDANCE = (
     "Section patch object keyed by any of: summary, main_claims, why_relevant, limitations, "
     "notes, related_links. Intended use: summary=high-level takeaway in 2-4 sentences, "
@@ -44,8 +48,7 @@ PAPER_CARD_CREATE_SECTIONS_GUIDANCE = (
     "text, direct excerpts, bibliographic scraps, or stray observations. Do not put a "
     "synthesized paper summary, claim list, relevance rationale, limitations list, or a second "
     "mini-card in sections.notes. Do not include duplicate headings such as # Summary or ## Main "
-    "Claims inside sections.notes. "
-    + PAPER_CARD_SECTION_PATCH_GUIDANCE
+    "Claims inside sections.notes. " + PAPER_CARD_SECTION_PATCH_GUIDANCE
 )
 PAPER_CARD_METADATA_PATCH_GUIDANCE = (
     "Metadata patch object using: authors (list[str]), year (int or null), source (str), "
@@ -95,10 +98,16 @@ class KnowledgeTools:
         ] = None,
         tags: Annotated[
             list[str] | None,
-            Field(description="Optional note tags for filtering and retrieval."),
+            Field(
+                description=(
+                    "Optional note tags for filtering and retrieval. "
+                    f"{TAG_CREATION_GUIDANCE}"
+                )
+            ),
         ] = None,
     ) -> dict[str, object]:
         """Create a deterministic note from freeform text."""
+
         def run() -> dict[str, object]:
             self._require_non_empty_string(content, "content")
             note, path = self.vault.create_note(
@@ -175,7 +184,7 @@ class KnowledgeTools:
             Field(
                 description=(
                     "Optional paper tags for thematic grouping, e.g. memory, planning, or "
-                    "evaluation."
+                    f"evaluation. {TAG_CREATION_GUIDANCE}"
                 )
             ),
         ] = None,
@@ -190,12 +199,11 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Create a paper card with metadata plus optional canonical sections in one request."""
+
         def run() -> dict[str, object]:
             next_sections = self._optional_dict(sections, "sections")
             if not any((title, url, next_sections)):
-                raise InvalidInputError(
-                    "At least one of title, url, or sections must be provided."
-                )
+                raise InvalidInputError("At least one of title, url, or sections must be provided.")
             paper_card, path = self.vault.create_paper_card(
                 title=title,
                 authors=authors,
@@ -245,6 +253,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Append content to the canonical Content section of an existing note."""
+
         def run() -> dict[str, object]:
             self._require_non_empty_string(id, "id")
             self._require_non_empty_string(content, "content")
@@ -283,6 +292,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Edit supported sections and metadata on an existing note."""
+
         def run() -> dict[str, object]:
             self._require_non_empty_string(id, "id")
             next_mode = mode or "refresh"
@@ -327,6 +337,7 @@ class KnowledgeTools:
         ] = None,
     ) -> dict[str, object]:
         """Populate or replace the canonical structured sections on an existing paper card."""
+
         def run() -> dict[str, object]:
             self._require_non_empty_string(id, "id")
             next_mode = mode or "fill-empty"
@@ -393,6 +404,41 @@ class KnowledgeTools:
 
         return self._execute_tool("shardmind.list_objects", run)
 
+    @tool_spec("shardmind_list_tags", "shardmind.list_tags")
+    def list_tags(
+        self,
+        object_type: Annotated[
+            Literal["note", "paper-card"] | None,
+            Field(description="Optional type filter. Omit to include tags from both object types."),
+        ] = None,
+        path_scope: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Optional path prefix filter such as notes/inbox or library/papers; "
+                    "limits tags to documents under that path."
+                )
+            ),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=200,
+                description="Maximum number of distinct tag strings to return (index-backed).",
+            ),
+        ] = 200,
+    ) -> dict[str, object]:
+        def run() -> dict[str, object]:
+            tags = self._list_live_tags(
+                object_type=object_type,
+                path_scope=path_scope,
+                limit=limit,
+            )
+            return {"ok": True, "result": {"tags": tags}}
+
+        return self._execute_tool("shardmind.list_tags", run)
+
     @tool_spec("shardmind_search", "shardmind.search")
     def search(
         self,
@@ -415,9 +461,7 @@ class KnowledgeTools:
         tags: Annotated[
             list[str] | None,
             Field(
-                description=(
-                    "Optional tag filter; only objects matching these tags are returned."
-                )
+                description=("Optional tag filter; only objects matching these tags are returned.")
             ),
         ] = None,
     ) -> dict[str, object]:
@@ -539,3 +583,40 @@ class KnowledgeTools:
                 live_results.append(candidate)
             if len(live_results) >= top_k or not stale_found:
                 return live_results[:top_k]
+
+    def _list_live_tags(
+        self,
+        *,
+        object_type: Literal["note", "paper-card"] | None,
+        path_scope: str | None,
+        limit: int,
+    ) -> list[str]:
+        stale_found = False
+        live_tags: list[str] = []
+        seen_tags: set[str] = set()
+        tag_references = self.index.list_tag_references(
+            object_type=object_type,
+            path_scope=path_scope,
+        )
+        for candidate in tag_references:
+            if len(live_tags) >= limit:
+                break
+            tag = str(candidate["tag"])
+            if tag in seen_tags:
+                continue
+            resolved = self.vault.reconcile_index_entry(
+                str(candidate["id"]),
+                str(candidate["path"]),
+            )
+            if resolved is None:
+                stale_found = True
+                continue
+            seen_tags.add(tag)
+            live_tags.append(tag)
+        if stale_found:
+            return self.index.list_tags(
+                object_type=object_type,
+                path_scope=path_scope,
+                limit=limit,
+            )
+        return live_tags

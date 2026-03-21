@@ -24,6 +24,7 @@ from shardmind.models import (
     PaperCardProvenance,
     PaperCardSections,
 )
+from shardmind.obsidian_tags import normalize_tag_list
 from shardmind.paper_cards import ENRICHABLE_PAPER_CARD_SECTIONS
 from shardmind.schemas import SchemaStore
 from shardmind.vault.bootstrap import bootstrap_vault
@@ -79,7 +80,7 @@ class VaultService:
         note = Note(
             id=object_id,
             title=normalized_title,
-            tags=list(tags or []),
+            tags=normalize_tag_list(list(tags or [])),
             provenance=NoteProvenance(created_from=created_from),
             created_at=self._timestamp(now),
             updated_at=self._timestamp(now),
@@ -122,9 +123,7 @@ class VaultService:
                 normalized_sections.related_links,
             )
         ):
-            raise InvalidInputError(
-                "At least one of title, url, or sections must be provided."
-            )
+            raise InvalidInputError("At least one of title, url, or sections must be provided.")
         canonical_title = (title or self._paper_card_title(normalized_sections.notes, url)).strip()
         normalized_citekey = self._normalize_citekey(citekey)
         duplicate_of = self._duplicate_paper_card_id(
@@ -523,13 +522,17 @@ class VaultService:
         if field_name == "tags":
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
                 raise InvalidInputError("tags must be a list of strings.")
-            return value
+            return normalize_tag_list(value)
         raise InvalidInputError(f"Unsupported note metadata field '{field_name}'.")
 
     def _normalize_paper_card_metadata_value(self, field_name: str, value: object) -> object:
-        if field_name in {"authors", "tags"}:
+        if field_name == "tags":
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-                raise InvalidInputError(f"{field_name} must be a list of strings.")
+                raise InvalidInputError("tags must be a list of strings.")
+            return normalize_tag_list(value)
+        if field_name == "authors":
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise InvalidInputError("authors must be a list of strings.")
             return value
         if field_name == "year":
             if value is None or isinstance(value, int):

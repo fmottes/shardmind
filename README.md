@@ -104,6 +104,7 @@ Current exported MCP tools:
 - `shardmind_edit_paper_card`
 - `shardmind_get_object`
 - `shardmind_list_objects`
+- `shardmind_list_tags`
 - `shardmind_search`
 
 ## Suggested Prompts
