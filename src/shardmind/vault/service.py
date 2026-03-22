@@ -318,6 +318,43 @@ class VaultService:
             return record, relative_path
         raise NotFoundError(f"No object found for id '{paper_card_id_value}'.")
 
+    def delete_object(self, object_id: str) -> tuple[ObjectRecord, str]:
+        record, relative_path = self.read_object(object_id)
+        target = self.vault_path / relative_path
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise WriteFailedError(f"Could not delete object at '{relative_path}'.") from exc
+        if self.index is not None:
+            self.index.remove_object(record.id)
+        self.log_write("shardmind.delete_object", record.id, "delete", True, relative_path)
+        return record, relative_path
+
+    def move_object(self, object_id: str, new_relative_path: str) -> tuple[ObjectRecord, str]:
+        record, current_relative_path = self.read_object(object_id)
+        target_relative_path = self._validate_relative_path(
+            new_relative_path,
+            expected_type=record.type,
+        )
+        if target_relative_path == current_relative_path:
+            return record, current_relative_path
+        source = self.vault_path / current_relative_path
+        target = self.vault_path / target_relative_path
+        if target.exists():
+            raise DuplicateObjectError(f"An object already exists at '{target_relative_path}'.")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            source.replace(target)
+        except OSError as exc:
+            raise WriteFailedError(
+                f"Could not move object from '{current_relative_path}' to '{target_relative_path}'."
+            ) from exc
+        self._reindex_if_available(record, target_relative_path)
+        self.log_write("shardmind.move_object", record.id, "move", True, target_relative_path)
+        return record, target_relative_path
+
     def reconcile_index_entry(
         self,
         object_id: str,
@@ -540,7 +577,7 @@ class VaultService:
     def _object_stem(self, label: str, object_id: str) -> str:
         return f"{slugify(label)}--{short_id(object_id)}"
 
-    def _validate_new_relative_path(self, relative_path: str, *, expected_type: str) -> str:
+    def _validate_relative_path(self, relative_path: str, *, expected_type: str) -> str:
         normalized = self._normalize_relative_path(relative_path)
         actual_type = self._classify_relative_path(normalized)
         if actual_type is None:
@@ -556,6 +593,9 @@ class VaultService:
                 )
             raise InvalidInputError("Paper card relative_path must stay under library/papers/.")
         return normalized
+
+    def _validate_new_relative_path(self, relative_path: str, *, expected_type: str) -> str:
+        return self._validate_relative_path(relative_path, expected_type=expected_type)
 
     def _normalize_relative_path(self, relative_path: str) -> str:
         if not isinstance(relative_path, str) or not relative_path.strip():

@@ -67,6 +67,36 @@ class VaultServiceTest(unittest.TestCase):
         updated_note, _ = self.runtime.vault.append_to_note(note.id, "More context")
         self.assertEqual(updated_note.sections.content, "Original\n\nMore context")
 
+    def test_move_note_updates_path_and_index(self) -> None:
+        note, relative_path = self.runtime.vault.create_note(title="Movable", content="Body")
+
+        moved, moved_path = self.runtime.vault.move_object(
+            note.id,
+            "archive/2026/reorg/movable.md",
+        )
+
+        self.assertEqual(moved.id, note.id)
+        self.assertEqual(moved_path, "archive/2026/reorg/movable.md")
+        self.assertFalse((self.runtime.settings.vault_path / relative_path).exists())
+        self.assertTrue((self.runtime.settings.vault_path / moved_path).exists())
+        self.assertEqual(self.runtime.index.get_path(note.id), moved_path)
+
+    def test_move_object_rejects_crossing_into_protected_zone(self) -> None:
+        note, _ = self.runtime.vault.create_note(title="Protected move", content="Body")
+
+        with self.assertRaises(InvalidInputError):
+            self.runtime.vault.move_object(note.id, "library/papers/protected.md")
+
+    def test_delete_object_removes_file_and_index(self) -> None:
+        note, relative_path = self.runtime.vault.create_note(title="Disposable", content="Body")
+
+        deleted, deleted_path = self.runtime.vault.delete_object(note.id)
+
+        self.assertEqual(deleted.id, note.id)
+        self.assertEqual(deleted_path, relative_path)
+        self.assertFalse((self.runtime.settings.vault_path / relative_path).exists())
+        self.assertIsNone(self.runtime.index.get_path(note.id))
+
     def test_create_note_accepts_nested_relative_paths_in_allowed_roots(self) -> None:
         cases = [
             ("Notes nested", "notes/projects/ideas/nested-note.md"),
@@ -245,6 +275,23 @@ Summary here
             (self.runtime.settings.vault_path / relative_path).read_text(encoding="utf-8")
         )
         self.assertEqual(saved.id, paper_card.id)
+
+    def test_move_paper_card_stays_within_paper_zone(self) -> None:
+        paper_card, relative_path = self.runtime.vault.create_paper_card(
+            title="Movable paper",
+            sections={"notes": "abstract"},
+        )
+
+        moved, moved_path = self.runtime.vault.move_object(
+            paper_card.id,
+            "library/papers/ml/reorg/movable-paper.md",
+        )
+
+        self.assertEqual(moved.id, paper_card.id)
+        self.assertEqual(moved_path, "library/papers/ml/reorg/movable-paper.md")
+        self.assertFalse((self.runtime.settings.vault_path / relative_path).exists())
+        self.assertTrue((self.runtime.settings.vault_path / moved_path).exists())
+        self.assertEqual(self.runtime.index.get_path(paper_card.id), moved_path)
 
     def test_create_paper_card_rejects_invalid_relative_paths(self) -> None:
         invalid_paths = [

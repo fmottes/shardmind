@@ -106,6 +106,8 @@ Current exported MCP tools:
 - `shardmind_create_paper_card`
 - `shardmind_edit_paper_card`
 - `shardmind_get_object`
+- `shardmind_move_object`
+- `shardmind_delete_object`
 - `shardmind_list_objects`
 - `shardmind_list_tags`
 - `shardmind_search`
@@ -130,6 +132,9 @@ well:
 - Notes may be created under `notes/**`, `archive/**`, or `library/**` except `library/papers/**`.
 - `shardmind_create_note` and `shardmind_create_paper_card` accept optional `relative_path`
   parameters for explicit nested placement; create/edit flows remain ID-based after creation.
+- `shardmind_move_object` moves an existing object by id to a new allowed `relative_path` without
+  changing its id.
+- `shardmind_delete_object` deletes an existing object by id and removes it from the derived index.
 - `uv run shardmind reindex-all` is the supported repair path after manual vault edits or index drift.
 - `shardmind_get_object`, `shardmind_list_objects`, and `shardmind_search` return `note_title` or
   `paper_title` plus a `wikilink` file stem so MCP clients can create correct Obsidian links

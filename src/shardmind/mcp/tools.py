@@ -23,6 +23,11 @@ OBJECT_ID_GUIDANCE = (
     "Object id returned by create, list, search, or get tools. Use note-... for notes and "
     "paper-... for paper cards."
 )
+OBJECT_PATH_GUIDANCE = (
+    "Vault-relative Markdown path. Notes may live under notes/, archive/, or library/ except "
+    "library/papers/. Paper cards must stay under library/papers/. Paths under assets/ and "
+    "system/ are rejected."
+)
 NOTE_CONTENT_GUIDANCE = (
     "Main note body for the # Content section. Use complete prose or bullets that should live "
     "in the note. "
@@ -399,6 +404,63 @@ class KnowledgeTools:
             return {"ok": True, "result": record.to_document(path)}
 
         return self._execute_tool("shardmind.get_object", run)
+
+    @tool_spec("shardmind_move_object", "shardmind.move_object")
+    def move_object(
+        self,
+        id: Annotated[str, Field(description=OBJECT_ID_GUIDANCE)],  # noqa: A002
+        relative_path: Annotated[
+            str,
+            Field(
+                description=(
+                    "New vault-relative Markdown path for the existing object. "
+                    f"{OBJECT_PATH_GUIDANCE}"
+                )
+            ),
+        ],
+    ) -> dict[str, object]:
+        """Move an existing object to a new allowed path without changing its id."""
+
+        def run() -> dict[str, object]:
+            self._require_non_empty_string(id, "id")
+            self._require_non_empty_string(relative_path, "relative_path")
+            record, path = self.vault.move_object(id, relative_path)
+            return {
+                "ok": True,
+                "result": {
+                    "id": record.id,
+                    "type": record.type,
+                    "path": path,
+                    **titled_fields(record.type, record.title),
+                    **path_reference_fields(path),
+                },
+            }
+
+        return self._execute_tool("shardmind.move_object", run)
+
+    @tool_spec("shardmind_delete_object", "shardmind.delete_object")
+    def delete_object(
+        self,
+        id: Annotated[str, Field(description=OBJECT_ID_GUIDANCE)],  # noqa: A002
+    ) -> dict[str, object]:
+        """Delete an existing object by id and remove it from the derived index."""
+
+        def run() -> dict[str, object]:
+            self._require_non_empty_string(id, "id")
+            record, path = self.vault.delete_object(id)
+            return {
+                "ok": True,
+                "result": {
+                    "id": record.id,
+                    "type": record.type,
+                    "path": path,
+                    "deleted": True,
+                    **titled_fields(record.type, record.title),
+                    **path_reference_fields(path),
+                },
+            }
+
+        return self._execute_tool("shardmind.delete_object", run)
 
     @tool_spec("shardmind_list_objects", "shardmind.list_objects")
     def list_objects(

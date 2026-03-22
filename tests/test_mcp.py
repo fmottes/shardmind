@@ -145,6 +145,55 @@ class MCPToolsTest(unittest.TestCase):
         self.assertEqual(fetched["result"]["note_title"], "Updated Note")
         self.assertEqual(fetched["result"]["sections"]["content"], "Updated content")
 
+    def test_move_object_note_via_mcp_envelope(self) -> None:
+        created = self.runtime.tools.create_note(
+            title="Movable Note",
+            content="Seed body",
+        )
+        self.assertTrue(created["ok"])
+
+        moved = self.runtime.tools.move_object(
+            id=created["result"]["id"],
+            relative_path="archive/2026/reorg/movable-note.md",
+        )
+        self.assertTrue(moved["ok"])
+        self.assertEqual(moved["result"]["path"], "archive/2026/reorg/movable-note.md")
+        self.assertEqual(moved["result"]["note_title"], "Movable Note")
+
+        fetched = self.runtime.tools.get_object(created["result"]["id"])
+        self.assertTrue(fetched["ok"])
+        self.assertEqual(fetched["result"]["path"], "archive/2026/reorg/movable-note.md")
+
+    def test_delete_object_via_mcp_envelope(self) -> None:
+        created = self.runtime.tools.create_paper_card(
+            title="Disposable card",
+            sections={"notes": "abstract"},
+        )
+        self.assertTrue(created["ok"])
+
+        deleted = self.runtime.tools.delete_object(id=created["result"]["id"])
+        self.assertTrue(deleted["ok"])
+        self.assertTrue(deleted["result"]["deleted"])
+        self.assertEqual(deleted["result"]["type"], "paper-card")
+
+        fetched = self.runtime.tools.get_object(created["result"]["id"])
+        self.assertFalse(fetched["ok"])
+        self.assertEqual(fetched["error"]["code"], "OBJECT_NOT_FOUND")
+
+    def test_move_object_rejects_crossing_type_boundary(self) -> None:
+        created = self.runtime.tools.create_note(
+            title="Protected Note",
+            content="body",
+        )
+        self.assertTrue(created["ok"])
+
+        moved = self.runtime.tools.move_object(
+            id=created["result"]["id"],
+            relative_path="library/papers/protected-note.md",
+        )
+        self.assertFalse(moved["ok"])
+        self.assertEqual(moved["error"]["code"], "INVALID_INPUT")
+
     def test_create_and_edit_paper_card_via_mcp_envelope(self) -> None:
         created = self.runtime.tools.create_paper_card(
             title="Memory Systems for Research Agents",
@@ -379,6 +428,11 @@ class MCPToolsTest(unittest.TestCase):
             "Use these structured sections for synthesized content",
             edit_paper.parameters["properties"]["sections"]["description"],
         )
+        move_object = server._tool_manager._tools["shardmind_move_object"]  # noqa: SLF001
+        self.assertIn("id", move_object.parameters["required"])
+        self.assertIn("relative_path", move_object.parameters["required"])
+        delete_object = server._tool_manager._tools["shardmind_delete_object"]  # noqa: SLF001
+        self.assertIn("id", delete_object.parameters["required"])
 
     def test_registered_tools_reject_unknown_fields(self) -> None:
         server = register_tools(FastMCP("ShardMind"), self.runtime.tools)

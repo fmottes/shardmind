@@ -29,6 +29,9 @@ server-side LLM generation are intentionally deferred.
   roots.
 - `shardmind.create_paper_card` accepts optional `relative_path` constrained to
   `library/papers/**`.
+- `shardmind.move_object` moves an existing object by id to a new allowed `relative_path` while
+  preserving object type and id.
+- `shardmind.delete_object` deletes an existing object by id and removes it from the derived index.
 - `destination` remains supported for note creation as a backward-compatible shortcut, but it is
   mutually exclusive with `relative_path`.
 
@@ -64,6 +67,8 @@ UV_CACHE_DIR=.uv-cache uv run shardmind invoke shardmind.create_note '{"title":"
 - `shardmind.create_paper_card` writes sparse deterministic paper cards.
 - `shardmind.create_note` and `shardmind.create_paper_card` support explicit nested placement via
   `relative_path`, but edits remain id-based after creation.
+- `shardmind.move_object` and `shardmind.delete_object` are the intended MCP tools for
+  reorganization agents; do not bypass them with arbitrary file edits.
 - `shardmind.edit_paper_card` applies structured section patches from the MCP client; it does
   not generate LLM content server-side.
 - `shardmind.append_to_note` still appends only to the note `Content` section.
