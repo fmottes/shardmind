@@ -18,6 +18,20 @@ server-side LLM generation are intentionally deferred.
 - That vault must be treated as a normal Obsidian vault, not as an exclusively owned application
   directory.
 
+## Vault Path Policy
+
+- `system/**` is reserved for ShardMind internals and is non-indexable.
+- `assets/**` is attachment storage and is non-indexable.
+- `library/papers/**` is a protected paper-card-only subtree, including nested subfolders.
+- Notes may live under `notes/**`, `archive/**`, and `library/**` except `library/papers/**`.
+- ShardMind object discovery and reindexing are recursive across supported Markdown subfolders.
+- `shardmind.create_note` accepts optional `relative_path` for explicit placement in allowed note
+  roots.
+- `shardmind.create_paper_card` accepts optional `relative_path` constrained to
+  `library/papers/**`.
+- `destination` remains supported for note creation as a backward-compatible shortcut, but it is
+  mutually exclusive with `relative_path`.
+
 ## Working Rules
 
 - Use `uv` for dependency management and Python commands.
@@ -48,6 +62,8 @@ UV_CACHE_DIR=.uv-cache uv run shardmind invoke shardmind.create_note '{"title":"
 
 - `shardmind.search` is lexical-only in Milestone 2; semantic ranking is deferred to Milestone 3.
 - `shardmind.create_paper_card` writes sparse deterministic paper cards.
+- `shardmind.create_note` and `shardmind.create_paper_card` support explicit nested placement via
+  `relative_path`, but edits remain id-based after creation.
 - `shardmind.edit_paper_card` applies structured section patches from the MCP client; it does
   not generate LLM content server-side.
 - `shardmind.append_to_note` still appends only to the note `Content` section.
