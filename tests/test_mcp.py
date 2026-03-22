@@ -76,6 +76,31 @@ class MCPToolsTest(unittest.TestCase):
             Path(searched["result"]["results"][0]["path"]).stem,
         )
 
+    def test_create_note_with_relative_path_under_library(self) -> None:
+        created = self.runtime.tools.create_note(
+            title="Library Note",
+            content="Nested body",
+            relative_path="library/references/agents/library-note.md",
+            tags=["memory"],
+        )
+        self.assertTrue(created["ok"])
+        self.assertEqual(
+            created["result"]["path"],
+            "library/references/agents/library-note.md",
+        )
+
+        fetched = self.runtime.tools.get_object(created["result"]["id"])
+        self.assertTrue(fetched["ok"])
+        self.assertEqual(fetched["result"]["type"], "note")
+        self.assertEqual(fetched["result"]["path"], "library/references/agents/library-note.md")
+
+        listed = self.runtime.tools.list_objects(path_scope="library/references/", limit=10)
+        self.assertTrue(listed["ok"])
+        self.assertEqual(
+            listed["result"]["objects"][0]["path"],
+            "library/references/agents/library-note.md",
+        )
+
     def test_edit_note_via_mcp_envelope(self) -> None:
         created = self.runtime.tools.create_note(
             title="Draft Note",
@@ -188,6 +213,35 @@ class MCPToolsTest(unittest.TestCase):
         self.assertEqual(fetched["result"]["frontmatter"]["source"], "arxiv")
         self.assertEqual(fetched["result"]["frontmatter"]["status"], "reviewed")
 
+    def test_create_paper_card_with_nested_relative_path(self) -> None:
+        created = self.runtime.tools.create_paper_card(
+            title="Nested card",
+            sections={"notes": "abstract"},
+            relative_path="library/papers/ml/transformers/nested-card.md",
+        )
+        self.assertTrue(created["ok"])
+        self.assertEqual(
+            created["result"]["path"],
+            "library/papers/ml/transformers/nested-card.md",
+        )
+
+        fetched = self.runtime.tools.get_object(created["result"]["id"])
+        self.assertTrue(fetched["ok"])
+        self.assertEqual(fetched["result"]["type"], "paper-card")
+        self.assertEqual(
+            fetched["result"]["path"],
+            "library/papers/ml/transformers/nested-card.md",
+        )
+
+    def test_create_note_rejects_protected_relative_path(self) -> None:
+        response = self.runtime.tools.create_note(
+            title="Protected",
+            content="body",
+            relative_path="library/papers/protected.md",
+        )
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "INVALID_INPUT")
+
     def test_duplicate_paper_card_returns_structured_error(self) -> None:
         first = self.runtime.tools.create_paper_card(
             title="Duplicate Card",
@@ -257,6 +311,7 @@ class MCPToolsTest(unittest.TestCase):
         self.assertNotIn("payload", parameters["properties"])
         self.assertIn("content", parameters["required"])
         self.assertIn("wikilink", parameters["properties"]["content"]["description"].lower())
+        self.assertIn("relative_path", parameters["properties"])
         self.assertIn(
             "Prefer existing tags",
             parameters["properties"]["tags"]["description"],
@@ -270,6 +325,7 @@ class MCPToolsTest(unittest.TestCase):
         self.assertIn("sections", create_paper.parameters["properties"])
         self.assertIn("source", create_paper.parameters["properties"])
         self.assertIn("status", create_paper.parameters["properties"])
+        self.assertIn("relative_path", create_paper.parameters["properties"])
         self.assertNotIn("notes", create_paper.parameters["properties"])
         self.assertIn(
             "mottes2026gradient",
@@ -438,7 +494,7 @@ class MCPToolsTest(unittest.TestCase):
         self.assertTrue(created["ok"])
         original_path = created["result"]["path"]
         source = self.runtime.settings.vault_path / original_path
-        destination = self.runtime.settings.vault_path / "notes" / "scratch" / source.name
+        destination = self.runtime.settings.vault_path / "notes" / "scratch" / "2026" / source.name
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.replace(destination)
 
@@ -486,7 +542,7 @@ class MCPToolsTest(unittest.TestCase):
         created = self.runtime.tools.create_note(title="Moved note", content="delta repair target")
         self.assertTrue(created["ok"])
         source = self.runtime.settings.vault_path / created["result"]["path"]
-        destination = self.runtime.settings.vault_path / "notes" / "scratch" / source.name
+        destination = self.runtime.settings.vault_path / "notes" / "scratch" / "2026" / source.name
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.replace(destination)
         bad = self.runtime.settings.vault_path / "notes" / "inbox" / "broken.md"

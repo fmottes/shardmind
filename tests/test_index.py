@@ -138,7 +138,9 @@ class IndexServiceTest(unittest.TestCase):
         note, path = self.runtime.vault.create_note(title="Repair me", content="body")
         self.runtime.index.reindex_object(note, path)
         source = self.runtime.settings.vault_path / path
-        destination = self.runtime.settings.vault_path / "notes" / "scratch" / source.name
+        destination = (
+            self.runtime.settings.vault_path / "notes" / "scratch" / "2026" / source.name
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.replace(destination)
 
@@ -146,9 +148,30 @@ class IndexServiceTest(unittest.TestCase):
         self.assertEqual(fetched.id, note.id)
         self.assertEqual(
             repaired_path,
-            f"notes/scratch/repair-me--{short_id(note.id)}.md",
+            f"notes/scratch/2026/repair-me--{short_id(note.id)}.md",
         )
         self.assertEqual(self.runtime.index.get_path(note.id), repaired_path)
+
+    def test_rebuild_includes_nested_note_and_nested_paper_card_paths(self) -> None:
+        note, note_path = self.runtime.vault.create_note(
+            title="Nested indexed",
+            content="body",
+            relative_path="archive/2026/rebuild/nested-note.md",
+        )
+        paper_card, paper_path = self.runtime.vault.create_paper_card(
+            title="Nested paper",
+            sections={"notes": "abstract"},
+            relative_path="library/papers/ml/rebuild/nested-paper.md",
+        )
+
+        self.runtime.index.rebuild(self.runtime.vault.list_objects_strict())
+
+        objects = self.runtime.index.list_objects(limit=10)
+        paths = {str(item["path"]) for item in objects}
+        self.assertIn(note_path, paths)
+        self.assertIn(paper_path, paths)
+        self.assertEqual(self.runtime.index.get_path(note.id), note_path)
+        self.assertEqual(self.runtime.index.get_path(paper_card.id), paper_path)
 
     def test_duplicate_detection_uses_index_metadata(self) -> None:
         paper_card, path = self.runtime.vault.create_paper_card(

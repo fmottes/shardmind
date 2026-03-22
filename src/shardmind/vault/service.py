@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import NamedTemporaryFile
 
 from shardmind.errors import (
@@ -37,6 +37,9 @@ from shardmind.vault.markdown import (
 )
 
 DESTINATIONS = {"inbox", "scratch", "daily"}
+NOTE_OBJECT_ROOTS = {"archive", "library", "notes"}
+NON_OBJECT_ROOTS = {"assets", "system"}
+PAPER_CARD_ROOT = PurePosixPath("library/papers")
 CITEKEY_PATTERN = re.compile(r"^[a-z]+[0-9]{4}[a-z0-9]+$")
 SAFE_PAPER_CARD_METADATA_FIELDS = {
     "authors",
@@ -68,11 +71,14 @@ class VaultService:
         content: str,
         title: str | None = None,
         destination: str | None = None,
+        relative_path: str | None = None,
         tags: list[str] | None = None,
         created_from: str = "mcp",
     ) -> tuple[Note, str]:
         if not content.strip():
             raise InvalidInputError("Note content must not be empty.")
+        if destination is not None and relative_path is not None:
+            raise InvalidInputError("destination and relative_path are mutually exclusive.")
         destination_name = self._normalize_destination(destination)
         now = self._now()
         normalized_title = (title or self._title_from_content(content)).strip()
@@ -87,13 +93,16 @@ class VaultService:
             sections=NoteSections(content=content.strip()),
         )
         self.schema_store.validate_note(note)
-        relative_path = (
-            f"notes/{destination_name}/{self._object_stem(normalized_title, object_id)}.md"
+        target_relative_path = self._note_create_path(
+            title=normalized_title,
+            object_id=object_id,
+            destination=destination_name,
+            relative_path=relative_path,
         )
-        self._write_object(relative_path, render_note(note))
-        self._reindex_if_available(note, relative_path)
-        self.log_write("shardmind.create_note", note.id, "create", True, relative_path)
-        return note, relative_path
+        self._write_new_object(target_relative_path, render_note(note))
+        self._reindex_if_available(note, target_relative_path)
+        self.log_write("shardmind.create_note", note.id, "create", True, target_relative_path)
+        return note, target_relative_path
 
     def create_paper_card(
         self,
@@ -107,6 +116,7 @@ class VaultService:
         sections: dict[str, str] | None = None,
         tags: list[str] | None = None,
         status: str | None = None,
+        relative_path: str | None = None,
         created_from: str = "mcp",
     ) -> tuple[PaperCard, str]:
         normalized_sections = self._normalize_created_paper_card_sections(sections)
@@ -153,14 +163,21 @@ class VaultService:
             sections=normalized_sections,
         )
         self.schema_store.validate_paper_card(paper_card)
-        relative_path = (
-            f"library/papers/"
-            f"{self._object_stem(normalized_citekey or canonical_title, object_id)}.md"
+        target_relative_path = self._paper_card_create_path(
+            title=normalized_citekey or canonical_title,
+            object_id=object_id,
+            relative_path=relative_path,
         )
-        self._write_object(relative_path, render_paper_card(paper_card))
-        self._reindex_if_available(paper_card, relative_path)
-        self.log_write("shardmind.create_paper_card", paper_card.id, "create", True, relative_path)
-        return paper_card, relative_path
+        self._write_new_object(target_relative_path, render_paper_card(paper_card))
+        self._reindex_if_available(paper_card, target_relative_path)
+        self.log_write(
+            "shardmind.create_paper_card",
+            paper_card.id,
+            "create",
+            True,
+            target_relative_path,
+        )
+        return paper_card, target_relative_path
 
     def append_to_note(
         self,
@@ -323,7 +340,7 @@ class VaultService:
         """List all vault objects and fail fast on malformed files."""
         return [
             (
-                parse_object(path.read_text(encoding="utf-8")),
+                self._parse_object_path(path),
                 path.relative_to(self.vault_path).as_posix(),
             )
             for path in self._object_paths()
@@ -369,13 +386,23 @@ class VaultService:
             return
 
     def _note_paths(self) -> list[Path]:
-        return sorted((self.vault_path / "notes").glob("*/*.md"))
+        return [path for path in self._object_paths() if self._expected_object_type(path) == "note"]
 
     def _paper_card_paths(self) -> list[Path]:
-        return sorted((self.vault_path / "library" / "papers").glob("*.md"))
+        return [
+            path
+            for path in self._object_paths()
+            if self._expected_object_type(path) == "paper-card"
+        ]
 
     def _object_paths(self) -> list[Path]:
-        return sorted([*self._note_paths(), *self._paper_card_paths()])
+        paths: list[Path] = []
+        for root in ("archive", "library", "notes"):
+            base = self.vault_path / root
+            if not base.exists():
+                continue
+            paths.extend(path for path in base.rglob("*.md") if path.is_file())
+        return sorted(paths)
 
     def _scan_for_object(self, object_id: str) -> tuple[ObjectRecord, str] | None:
         for path in self._object_paths():
@@ -390,13 +417,12 @@ class VaultService:
     def _read_from_relative_path(self, relative_path: str) -> tuple[ObjectRecord, str] | None:
         target = self.vault_path / relative_path
         try:
-            payload = target.read_text(encoding="utf-8")
+            record = self._parse_object_path(target)
         except OSError:
             return None
-        try:
-            return parse_object(payload), relative_path
         except ValueError:
             return None
+        return record, relative_path
 
     def _paper_card_records(self) -> list[tuple[PaperCard, str]]:
         results: list[tuple[PaperCard, str]] = []
@@ -431,23 +457,21 @@ class VaultService:
 
     def _safe_parse_object_path(self, path: Path) -> tuple[ObjectRecord, str] | None:
         try:
-            payload = path.read_text(encoding="utf-8")
+            record = self._parse_object_path(path)
         except OSError:
             return None
-        try:
-            record = parse_object(payload)
         except ValueError:
             return None
         return record, path.relative_to(self.vault_path).as_posix()
 
     def _safe_parse_paper_card_path(self, path: Path) -> tuple[PaperCard, str] | None:
         try:
-            payload = path.read_text(encoding="utf-8")
+            record = self._parse_object_path(path)
         except OSError:
             return None
-        try:
-            record = parse_paper_card(payload)
         except ValueError:
+            return None
+        if not isinstance(record, PaperCard):
             return None
         return record, path.relative_to(self.vault_path).as_posix()
 
@@ -461,6 +485,29 @@ class VaultService:
         if candidate not in DESTINATIONS:
             raise InvalidInputError(f"Unsupported note destination '{candidate}'.")
         return candidate
+
+    def _note_create_path(
+        self,
+        *,
+        title: str,
+        object_id: str,
+        destination: str,
+        relative_path: str | None,
+    ) -> str:
+        if relative_path is None:
+            return f"notes/{destination}/{self._object_stem(title, object_id)}.md"
+        return self._validate_new_relative_path(relative_path, expected_type="note")
+
+    def _paper_card_create_path(
+        self,
+        *,
+        title: str,
+        object_id: str,
+        relative_path: str | None,
+    ) -> str:
+        if relative_path is None:
+            return f"library/papers/{self._object_stem(title, object_id)}.md"
+        return self._validate_new_relative_path(relative_path, expected_type="paper-card")
 
     def _title_from_content(self, content: str) -> str:
         first_line = next(
@@ -493,6 +540,75 @@ class VaultService:
     def _object_stem(self, label: str, object_id: str) -> str:
         return f"{slugify(label)}--{short_id(object_id)}"
 
+    def _validate_new_relative_path(self, relative_path: str, *, expected_type: str) -> str:
+        normalized = self._normalize_relative_path(relative_path)
+        actual_type = self._classify_relative_path(normalized)
+        if actual_type is None:
+            raise InvalidInputError(
+                "relative_path must stay under notes/, archive/, or library/ for notes, "
+                "or under library/papers/ for paper cards."
+            )
+        if actual_type != expected_type:
+            if expected_type == "note":
+                raise InvalidInputError(
+                    "Note relative_path must stay under notes/, archive/, or library/ but not "
+                    "library/papers/."
+                )
+            raise InvalidInputError("Paper card relative_path must stay under library/papers/.")
+        return normalized
+
+    def _normalize_relative_path(self, relative_path: str) -> str:
+        if not isinstance(relative_path, str) or not relative_path.strip():
+            raise InvalidInputError("relative_path must be a non-empty string.")
+        candidate = PurePosixPath(relative_path.strip())
+        if candidate.is_absolute():
+            raise InvalidInputError("relative_path must be vault-relative, not absolute.")
+        if any(part in {"", ".", ".."} for part in candidate.parts):
+            raise InvalidInputError(
+                "relative_path must be normalized and must not contain '.' or '..'."
+            )
+        if candidate.suffix != ".md":
+            raise InvalidInputError("relative_path must point to a Markdown .md file.")
+        if len(candidate.parts) < 2:
+            raise InvalidInputError(
+                "relative_path must include at least a root folder and filename."
+            )
+        return candidate.as_posix()
+
+    def _classify_relative_path(self, relative_path: str) -> str | None:
+        candidate = PurePosixPath(relative_path)
+        root = candidate.parts[0]
+        if root in NON_OBJECT_ROOTS:
+            return None
+        if root not in NOTE_OBJECT_ROOTS:
+            return None
+        if candidate.is_relative_to(PAPER_CARD_ROOT):
+            return "paper-card"
+        return "note"
+
+    def _expected_object_type(self, path: Path) -> str | None:
+        try:
+            relative_path = path.relative_to(self.vault_path).as_posix()
+        except ValueError as exc:
+            raise ValueError(f"Path '{path}' is outside the vault.") from exc
+        return self._classify_relative_path(relative_path)
+
+    def _parse_object_path(self, path: Path) -> ObjectRecord:
+        expected_type = self._expected_object_type(path)
+        if expected_type is None:
+            raise ValueError(f"Path '{path}' is outside the indexable vault roots.")
+        payload = path.read_text(encoding="utf-8")
+        if expected_type == "paper-card":
+            record = parse_paper_card(payload)
+        else:
+            record = parse_object(payload)
+        if record.type != expected_type:
+            raise ValueError(
+                f"Path '{path}' is reserved for {expected_type} objects but contains "
+                f"'{record.type}'."
+            )
+        return record
+
     def _write_object(self, relative_path: str, payload: str) -> None:
         target = self.vault_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -503,6 +619,12 @@ class VaultService:
             tmp_path.replace(target)
         except OSError as exc:
             raise WriteFailedError(f"Could not write object to '{relative_path}'.") from exc
+
+    def _write_new_object(self, relative_path: str, payload: str) -> None:
+        target = self.vault_path / relative_path
+        if target.exists():
+            raise DuplicateObjectError(f"An object already exists at '{relative_path}'.")
+        self._write_object(relative_path, payload)
 
     def _timestamp(self, value: datetime) -> str:
         return value.isoformat().replace("+00:00", "Z")

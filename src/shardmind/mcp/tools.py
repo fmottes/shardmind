@@ -96,6 +96,18 @@ class KnowledgeTools:
                 )
             ),
         ] = None,
+        relative_path: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Optional vault-relative Markdown path for the new note, such as "
+                    "notes/projects/ideas/memory.md, library/references/topic.md, or "
+                    "archive/2026/retrospective.md. Must not be used together with destination. "
+                    "Notes may live under notes/, archive/, or library/ except library/papers/. "
+                    "Paths under assets/ and system/ are rejected."
+                )
+            ),
+        ] = None,
         tags: Annotated[
             list[str] | None,
             Field(
@@ -114,6 +126,7 @@ class KnowledgeTools:
                 title=title,
                 content=content,
                 destination=destination,
+                relative_path=relative_path,
                 tags=tags,
             )
             return {
@@ -197,6 +210,16 @@ class KnowledgeTools:
                 )
             ),
         ] = None,
+        relative_path: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Optional vault-relative Markdown path for the new paper card, such as "
+                    "library/papers/ml/transformers/attention-card.md. Must stay under "
+                    "library/papers/ and end in .md."
+                )
+            ),
+        ] = None,
     ) -> dict[str, object]:
         """Create a paper card with metadata plus optional canonical sections in one request."""
 
@@ -214,6 +237,7 @@ class KnowledgeTools:
                 sections=next_sections,
                 tags=tags,
                 status=status,
+                relative_path=relative_path,
             )
             return {
                 "ok": True,

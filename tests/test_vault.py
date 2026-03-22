@@ -67,6 +67,51 @@ class VaultServiceTest(unittest.TestCase):
         updated_note, _ = self.runtime.vault.append_to_note(note.id, "More context")
         self.assertEqual(updated_note.sections.content, "Original\n\nMore context")
 
+    def test_create_note_accepts_nested_relative_paths_in_allowed_roots(self) -> None:
+        cases = [
+            ("Notes nested", "notes/projects/ideas/nested-note.md"),
+            ("Library nested", "library/references/agents/library-note.md"),
+            ("Archive nested", "archive/2026/retrospective/archive-note.md"),
+        ]
+        for title, relative_path in cases:
+            note, saved_path = self.runtime.vault.create_note(
+                title=title,
+                content="Body",
+                relative_path=relative_path,
+            )
+            self.assertEqual(saved_path, relative_path)
+            saved = parse_note(
+                (self.runtime.settings.vault_path / saved_path).read_text(encoding="utf-8")
+            )
+            self.assertEqual(saved.id, note.id)
+            self.assertEqual(saved.type, "note")
+
+    def test_create_note_rejects_invalid_relative_paths(self) -> None:
+        invalid_paths = [
+            "system/logs/note.md",
+            "assets/images/note.md",
+            "library/papers/note.md",
+            "/notes/absolute.md",
+            "notes/../escape.md",
+            "notes/no-markdown.txt",
+        ]
+        for relative_path in invalid_paths:
+            with self.assertRaises(InvalidInputError):
+                self.runtime.vault.create_note(
+                    title="Invalid path",
+                    content="Body",
+                    relative_path=relative_path,
+                )
+
+    def test_create_note_rejects_destination_and_relative_path_together(self) -> None:
+        with self.assertRaisesRegex(InvalidInputError, "mutually exclusive"):
+            self.runtime.vault.create_note(
+                title="Conflict",
+                content="Body",
+                destination="inbox",
+                relative_path="notes/projects/conflict.md",
+            )
+
     def test_update_note_refresh_updates_content_and_metadata(self) -> None:
         note, _ = self.runtime.vault.create_note(
             content="Original content",
@@ -188,6 +233,34 @@ Summary here
         log_path = self.runtime.settings.vault_path / "system" / "logs" / "operations.log"
         event = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertEqual(event["tool_name"], "shardmind.create_paper_card")
+
+    def test_create_paper_card_accepts_nested_relative_path(self) -> None:
+        paper_card, relative_path = self.runtime.vault.create_paper_card(
+            title="Nested paper",
+            sections={"notes": "abstract"},
+            relative_path="library/papers/ml/transformers/nested-paper.md",
+        )
+        self.assertEqual(relative_path, "library/papers/ml/transformers/nested-paper.md")
+        saved = parse_paper_card(
+            (self.runtime.settings.vault_path / relative_path).read_text(encoding="utf-8")
+        )
+        self.assertEqual(saved.id, paper_card.id)
+
+    def test_create_paper_card_rejects_invalid_relative_paths(self) -> None:
+        invalid_paths = [
+            "notes/inbox/not-a-paper.md",
+            "library/references/not-a-paper.md",
+            "/library/papers/absolute.md",
+            "library/papers/../escape.md",
+            "library/papers/not-a-paper.txt",
+        ]
+        for relative_path in invalid_paths:
+            with self.assertRaises(InvalidInputError):
+                self.runtime.vault.create_paper_card(
+                    title="Invalid paper path",
+                    sections={"notes": "abstract"},
+                    relative_path=relative_path,
+                )
 
     def test_update_paper_card_sections_preserves_user_owned_fields(self) -> None:
         paper_card, relative_path = self.runtime.vault.create_paper_card(
@@ -329,6 +402,28 @@ Summary here
 
         self.assertEqual(records, [(note, path)])
         self.assertEqual(skipped, ["notes/inbox/broken.md"])
+
+    def test_list_indexable_objects_recurses_and_skips_wrong_zone_files(self) -> None:
+        note, note_path = self.runtime.vault.create_note(
+            title="Nested note",
+            content="body",
+            relative_path="archive/2026/deep/note.md",
+        )
+        paper_card, paper_path = self.runtime.vault.create_paper_card(
+            title="Nested paper",
+            sections={"notes": "abstract"},
+            relative_path="library/papers/ml/deep/paper.md",
+        )
+        wrong_zone = self.runtime.settings.vault_path / "library" / "papers" / "wrong-zone-note.md"
+        wrong_zone.parent.mkdir(parents=True, exist_ok=True)
+        wrong_zone.write_text(render_note(note), encoding="utf-8")
+
+        records, skipped = self.runtime.vault.list_indexable_objects()
+
+        self.assertEqual({relative_path for _, relative_path in records}, {note_path, paper_path})
+        self.assertEqual(skipped, ["library/papers/wrong-zone-note.md"])
+        with self.assertRaises(ValueError):
+            self.runtime.vault.list_objects_strict()
 
     def test_invalid_citekey_format_is_rejected(self) -> None:
         with self.assertRaisesRegex(InvalidInputError, "mottes2026gradient"):

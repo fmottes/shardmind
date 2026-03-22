@@ -62,3 +62,39 @@ class CLITest(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(out.getvalue().strip(), "1")
         self.assertIn("Skipped 1 malformed file(s)", err.getvalue())
+
+    def test_reindex_all_discovers_nested_paths(self) -> None:
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                main(
+                    [
+                        "invoke",
+                        "shardmind_create_note",
+                        (
+                            '{"title":"nested note","content":"body",'
+                            '"relative_path":"archive/2026/reindex/nested-note.md"}'
+                        ),
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(
+                main(
+                    [
+                        "invoke",
+                        "shardmind_create_paper_card",
+                        (
+                            '{"title":"nested paper","sections":{"notes":"abstract"},'
+                            '"relative_path":"library/papers/ml/reindex/nested-paper.md"}'
+                        ),
+                    ]
+                ),
+                0,
+            )
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            result = main(["reindex-all"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(out.getvalue().strip(), "2")

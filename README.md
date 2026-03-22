@@ -4,6 +4,7 @@ ShardMind is an MCP-first local research memory system.
 
 Current state:
 - notes and paper cards are stored as canonical Markdown in an Obsidian-style vault
+- note and paper-card files can live in nested subfolders within their allowed roots
 - the MCP server supports deterministic create/read/list/search flows for both object types
 - paper-card editing is a structured patch operation driven by the MCP client
 - search is still lexical-only in the current milestone; real semantic ranking is deferred
@@ -93,7 +94,9 @@ After saving the config:
 3. Start a new chat.
 4. Try prompts like:
    - `Use ShardMind to create a note titled "test note" with content "hello from Claude".`
+   - `Use ShardMind to create a note with relative_path "archive/2026/test-note.md" and content "hello from Claude".`
    - `Use ShardMind to create a paper card titled "test paper" with sections.notes set to "example abstract".`
+   - `Use ShardMind to create a paper card with relative_path "library/papers/ml/test-paper.md" and sections.notes set to "example abstract".`
    - `Use ShardMind to search for "hello".`
 
 Current exported MCP tools:
@@ -121,6 +124,12 @@ well:
 
 - `dev-docs/` is scratch/reference material and not part of the runtime product surface.
 - The vault is canonical; the SQLite index is derived and can be rebuilt.
+- `system/**` is non-indexable and reserved for ShardMind internals.
+- `assets/**` is attachment storage, not note or paper-card storage.
+- `library/papers/**` is reserved for paper cards and their subfolders.
+- Notes may be created under `notes/**`, `archive/**`, or `library/**` except `library/papers/**`.
+- `shardmind_create_note` and `shardmind_create_paper_card` accept optional `relative_path`
+  parameters for explicit nested placement; create/edit flows remain ID-based after creation.
 - `uv run shardmind reindex-all` is the supported repair path after manual vault edits or index drift.
 - `shardmind_get_object`, `shardmind_list_objects`, and `shardmind_search` return `note_title` or
   `paper_title` plus a `wikilink` file stem so MCP clients can create correct Obsidian links
