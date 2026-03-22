@@ -97,6 +97,32 @@ class VaultServiceTest(unittest.TestCase):
         self.assertFalse((self.runtime.settings.vault_path / relative_path).exists())
         self.assertIsNone(self.runtime.index.get_path(note.id))
 
+    def test_delete_object_prunes_empty_note_parent_dirs(self) -> None:
+        note, relative_path = self.runtime.vault.create_note(
+            title="Disposable nested",
+            content="Body",
+            relative_path="archive/2026/reorg/tmp/disposable.md",
+        )
+
+        self.runtime.vault.delete_object(note.id)
+
+        self.assertFalse((self.runtime.settings.vault_path / relative_path).exists())
+        self.assertFalse((self.runtime.settings.vault_path / "archive" / "2026").exists())
+        self.assertTrue((self.runtime.settings.vault_path / "archive").exists())
+
+    def test_delete_object_prunes_empty_paper_parent_dirs_but_keeps_paper_root(self) -> None:
+        paper_card, relative_path = self.runtime.vault.create_paper_card(
+            title="Disposable paper",
+            sections={"notes": "abstract"},
+            relative_path="library/papers/ml/tmp/disposable-paper.md",
+        )
+
+        self.runtime.vault.delete_object(paper_card.id)
+
+        self.assertFalse((self.runtime.settings.vault_path / relative_path).exists())
+        self.assertFalse((self.runtime.settings.vault_path / "library" / "papers" / "ml").exists())
+        self.assertTrue((self.runtime.settings.vault_path / "library" / "papers").exists())
+
     def test_create_note_accepts_nested_relative_paths_in_allowed_roots(self) -> None:
         cases = [
             ("Notes nested", "notes/projects/ideas/nested-note.md"),

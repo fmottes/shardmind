@@ -327,6 +327,7 @@ class VaultService:
             pass
         except OSError as exc:
             raise WriteFailedError(f"Could not delete object at '{relative_path}'.") from exc
+        self._prune_empty_parent_dirs(target.parent, stop_dir=self._prune_stop_dir(relative_path))
         if self.index is not None:
             self.index.remove_object(record.id)
         self.log_write("shardmind.delete_object", record.id, "delete", True, relative_path)
@@ -648,6 +649,21 @@ class VaultService:
                 f"'{record.type}'."
             )
         return record
+
+    def _prune_stop_dir(self, relative_path: str) -> Path:
+        candidate = PurePosixPath(relative_path)
+        if candidate.is_relative_to(PAPER_CARD_ROOT):
+            return self.vault_path / PAPER_CARD_ROOT
+        return self.vault_path / candidate.parts[0]
+
+    def _prune_empty_parent_dirs(self, directory: Path, *, stop_dir: Path) -> None:
+        current = directory
+        while current != stop_dir and current != self.vault_path:
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
     def _write_object(self, relative_path: str, payload: str) -> None:
         target = self.vault_path / relative_path
