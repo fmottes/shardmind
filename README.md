@@ -15,18 +15,22 @@ Requirements:
 - Python 3.10+
 - `uv`
 
-Install dependencies:
+Install the project and contributor tooling:
 
 ```bash
-uv sync
+uv sync --extra dev
 ```
 
-Optional checks:
+Run the supported local checks before opening a PR:
 
 ```bash
 uv run ruff check .
+uv run ruff format --check .
 uv run python -m unittest discover -s tests -v
+uv build
 ```
+
+Contributor workflow details live in `CONTRIBUTING.md`.
 
 ## Run
 
@@ -137,10 +141,7 @@ well:
   changing its id.
 - `shardmind_delete_object` deletes an existing object by id and removes it from the derived index.
 - `shardmind_reindex_all` manually rebuilds the derived SQLite index from the vault and reports any
-  skipped malformed paths.
-- `uv run shardmind reindex-all` is the supported repair path after manual vault edits or index drift.
+  skipped malformed paths. Calls `uv run shardmind reindex-all`, which is the supported repair path after manual vault edits or index drift.
 - `shardmind_get_object`, `shardmind_list_objects`, and `shardmind_search` return `note_title` or
   `paper_title` plus a `wikilink` file stem so MCP clients can create correct Obsidian links
   without confusing frontmatter title with link target.
-- Server-side LLM generation is intentionally not implemented in the current milestone.
-- Server-side note normalization is intentionally not implemented in the current milestone.

@@ -11,7 +11,7 @@ authors = [{ name = "Francesco" }]
 dependencies = ["jsonschema", "mcp>=1.26,<1.27"]
 
 [project.optional-dependencies]
-dev = []
+dev = ["ruff"]
 
 [project.scripts]
 shardmind = "shardmind.cli:main"

@@ -138,9 +138,7 @@ class IndexServiceTest(unittest.TestCase):
         note, path = self.runtime.vault.create_note(title="Repair me", content="body")
         self.runtime.index.reindex_object(note, path)
         source = self.runtime.settings.vault_path / path
-        destination = (
-            self.runtime.settings.vault_path / "notes" / "scratch" / "2026" / source.name
-        )
+        destination = self.runtime.settings.vault_path / "notes" / "scratch" / "2026" / source.name
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.replace(destination)
 

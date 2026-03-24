@@ -117,8 +117,7 @@ class KnowledgeTools:
             list[str] | None,
             Field(
                 description=(
-                    "Optional note tags for filtering and retrieval. "
-                    f"{TAG_CREATION_GUIDANCE}"
+                    f"Optional note tags for filtering and retrieval. {TAG_CREATION_GUIDANCE}"
                 )
             ),
         ] = None,
