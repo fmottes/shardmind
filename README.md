@@ -1,6 +1,6 @@
 # ShardMind
 
-ShardMind is an MCP-first local research memory system.
+ShardMind is an MCP-first local research memory system. It is compatible with [Obsidian](https://obsidian.md), but is standalone.
 
 Current state:
 - notes and paper cards are stored as canonical Markdown in an Obsidian-style vault
